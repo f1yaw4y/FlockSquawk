@@ -184,7 +184,7 @@ void RadioScannerManager::wifiPacketHandler(void* buffer, wifi_promiscuous_pkt_t
     if (packet->rx_ctrl.sig_len < 24) return;
     
     const WiFi80211Header* header = (const WiFi80211Header*)rawData;
-    uint8_t frameSubtype = (header->frameControl & 0x0F) >> 4;
+    uint8_t frameSubtype = (header->frameControl & 0x00F0) >> 4;
     
     bool isProbeRequest = (frameSubtype == 0x04);
     bool isBeacon = (frameSubtype == 0x08);
