@@ -2,6 +2,8 @@
 
 FlockSquawk is a modular, event-driven ESP32 project for **passive RF awareness**. It listens to nearby WiFi and Bluetooth Low Energy activity, analyzes patterns against known signatures, and provides feedback through audio alerts, on-device displays, and structured telemetry.
 
+##There is currently a critical bug in the 128x32 OLED variant that prevents the scanner from capturing any WiFi packets. Please do not use this until the program is updated and this message is removed. The Mini12864 variant works as expected
+
 
 ---
 
