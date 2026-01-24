@@ -50,6 +50,7 @@ static size_t rssiIndex = 0;
 static bool rssiFilled = false;
 static uint16_t accentColor = TFT_GREEN;
 static uint8_t displayBrightness = 160;
+static const char* configPath = "/flocksquawk.json";
 
 static const int radarBoxX = 4;
 static const int radarBoxW = 312;
@@ -73,7 +74,8 @@ enum class MenuMode {
     None,
     Main,
     AdjustBacklight,
-    AdjustAccent
+    AdjustAccent,
+    ResetMenu
 };
 
 static MenuMode menuMode = MenuMode::None;
@@ -83,9 +85,19 @@ static const char* menuItems[] = {
     "Accent Color",
     "Test Alert",
     "Battery Saver",
+    "Save Settings",
+    "Reset",
     "Back"
 };
 static const size_t menuItemCount = sizeof(menuItems) / sizeof(menuItems[0]);
+static const int menuVisibleCount = 5;
+static int resetMenuIndex = 0;
+static const char* resetMenuItems[] = {
+    "Reset Alerts",
+    "Factory Reset",
+    "Back"
+};
+static const size_t resetMenuItemCount = sizeof(resetMenuItems) / sizeof(resetMenuItems[0]);
 
 struct AccentOption {
     const char* name;
@@ -97,7 +109,8 @@ static const AccentOption accentOptions[] = {
     {"Cyan", TFT_CYAN},
     {"Blue", TFT_BLUE},
     {"Purple", TFT_MAGENTA},
-    {"Amber", TFT_ORANGE}
+    {"Amber", TFT_ORANGE},
+    {"Red", TFT_RED}
 };
 static const size_t accentOptionCount = sizeof(accentOptions) / sizeof(accentOptions[0]);
 static size_t accentIndex = 0;
@@ -107,6 +120,10 @@ static unsigned long alertStart = 0;
 static unsigned long lastAlertFlash = 0;
 static bool alertFlashOn = true;
 static bool batterySaverEnabled = false;
+static bool displayIsOff = false;
+static bool infoPopupActive = false;
+static unsigned long infoPopupStart = 0;
+static const char* infoPopupText = "";
 
 // Event bus handler implementations
 EventBus::WiFiFrameHandler EventBus::wifiHandler = nullptr;
@@ -625,9 +642,10 @@ void setup() {
     M5.Display.clear();
     M5.Display.setTextSize(2);
     M5.Display.setCursor(0, 0);
-    M5.Display.setBrightness(displayBrightness);
     
     audioSystem.initialize();
+    loadSettingsFromSd();
+    setDisplayPower(true);
     M5.Display.println("System starting up...");
     delay(300);
     M5.Display.println("Setting up radios...");
@@ -835,21 +853,73 @@ static void drawMenuFrame() {
     M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
     M5.Display.drawString("Menu", 30, 46);
     
-    for (size_t i = 0; i < menuItemCount; i++) {
+    int visibleCount = menuVisibleCount;
+    if ((int)menuItemCount < visibleCount) {
+        visibleCount = (int)menuItemCount;
+    }
+    int scrollOffset = 0;
+    if ((int)menuItemCount > visibleCount && menuIndex >= visibleCount) {
+        scrollOffset = menuIndex - (visibleCount - 1);
+    }
+    int maxOffset = (int)menuItemCount - visibleCount;
+    if (scrollOffset > maxOffset) scrollOffset = maxOffset;
+    
+    for (int i = 0; i < visibleCount; i++) {
+        int itemIndex = scrollOffset + i;
         int y = 70 + (i * 24);
-        if ((int)i == menuIndex) {
+        if (itemIndex == menuIndex) {
             M5.Display.fillRect(28, y - 2, 264, 18, TFT_DARKGREY);
             M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREY);
         } else {
             M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
         }
-        if (i == 3) {
-            String label = String(menuItems[i]) + (batterySaverEnabled ? ": On" : ": Off");
+        if (itemIndex == 3) {
+            String label = String(menuItems[itemIndex]) + (batterySaverEnabled ? ": On" : ": Off");
             M5.Display.drawString(label, 36, y);
         } else {
-            M5.Display.drawString(menuItems[i], 36, y);
+            M5.Display.drawString(menuItems[itemIndex], 36, y);
         }
     }
+}
+
+static void drawResetMenuFrame() {
+    M5.Display.fillRect(20, 40, 280, 160, TFT_BLACK);
+    M5.Display.drawRect(20, 40, 280, 160, TFT_DARKGREY);
+    M5.Display.setTextSize(1);
+    M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
+    M5.Display.drawString("Reset", 30, 46);
+    
+    for (size_t i = 0; i < resetMenuItemCount; i++) {
+        int y = 70 + (i * 24);
+        if ((int)i == resetMenuIndex) {
+            M5.Display.fillRect(28, y - 2, 264, 18, TFT_DARKGREY);
+            M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREY);
+        } else {
+            M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+        }
+        M5.Display.drawString(resetMenuItems[i], 36, y);
+    }
+}
+
+static void showInfoPopup(const char* text) {
+    infoPopupActive = true;
+    infoPopupStart = millis();
+    infoPopupText = text;
+    
+    const int boxW = 200;
+    const int boxH = 60;
+    const int boxX = (320 - boxW) / 2;
+    const int boxY = (240 - boxH) / 2;
+    
+    M5.Display.fillRect(boxX, boxY, boxW, boxH, TFT_BLACK);
+    M5.Display.drawRect(boxX, boxY, boxW, boxH, TFT_DARKGREY);
+    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+    int textW = M5.Display.textWidth(text);
+    int textH = M5.Display.fontHeight();
+    int textX = boxX + (boxW - textW) / 2;
+    int textY = boxY + (boxH - textH) / 2;
+    M5.Display.setCursor(textX, textY);
+    M5.Display.print(text);
 }
 
 static void drawAdjustBacklight() {
@@ -896,14 +966,83 @@ static void resetHomeUi() {
     lastScanAnimUpdate = millis();
 }
 
+static void applyDefaultSettings() {
+    audioSystem.setVolume(SoundEngine::DEFAULT_VOLUME);
+    displayBrightness = 160;
+    accentIndex = 0;
+    accentColor = accentOptions[accentIndex].color;
+    batterySaverEnabled = false;
+    alertCount = 0;
+}
+
 static void setDisplayPower(bool on) {
     if (on) {
-        M5.Display.wakeup();
+        if (displayIsOff) {
+            M5.Display.wakeup();
+            displayIsOff = false;
+        }
         M5.Display.setBrightness(displayBrightness);
     } else {
         M5.Display.setBrightness(0);
         M5.Display.sleep();
+        displayIsOff = true;
     }
+}
+
+static bool saveSettingsToSd() {
+    DynamicJsonDocument doc(512);
+    doc["volume"] = audioSystem.getVolumeLevel();
+    doc["brightness"] = displayBrightness;
+    doc["accent_index"] = static_cast<int>(accentIndex);
+    doc["battery_saver"] = batterySaverEnabled;
+    doc["alert_count"] = alertCount;
+    
+    File file = SD.open(configPath, FILE_WRITE);
+    if (!file) {
+        Serial.println("[Config] Failed to open config for write");
+        return false;
+    }
+    file.seek(0);
+    file.print("");
+    file.seek(0);
+    serializeJson(doc, file);
+    file.close();
+    return true;
+}
+
+static bool loadSettingsFromSd() {
+    if (!SD.exists(configPath)) {
+        applyDefaultSettings();
+        return saveSettingsToSd();
+    }
+    
+    File file = SD.open(configPath, FILE_READ);
+    if (!file) {
+        Serial.println("[Config] Failed to open config for read");
+        return false;
+    }
+    
+    DynamicJsonDocument doc(512);
+    DeserializationError err = deserializeJson(doc, file);
+    file.close();
+    if (err) {
+        Serial.println("[Config] Failed to parse config, using defaults");
+        applyDefaultSettings();
+        return saveSettingsToSd();
+    }
+    
+    float volume = doc["volume"] | SoundEngine::DEFAULT_VOLUME;
+    audioSystem.setVolume(volume);
+    displayBrightness = doc["brightness"] | displayBrightness;
+    
+    int idx = doc["accent_index"] | 0;
+    if (idx < 0 || idx >= (int)accentOptionCount) idx = 0;
+    accentIndex = idx;
+    accentColor = accentOptions[accentIndex].color;
+    
+    batterySaverEnabled = doc["battery_saver"] | false;
+    alertCount = doc["alert_count"] | 0u;
+    return true;
 }
 
 static void triggerAlert(bool incrementCount) {
@@ -951,6 +1090,8 @@ static void restoreScreenAfterAlert() {
     }
     if (menuMode == MenuMode::Main) {
         drawMenuFrame();
+    } else if (menuMode == MenuMode::ResetMenu) {
+        drawResetMenuFrame();
     } else if (menuMode == MenuMode::AdjustBacklight) {
         drawAdjustBacklight();
     } else if (menuMode == MenuMode::AdjustAccent) {
@@ -977,11 +1118,26 @@ static void handleAlertPopup() {
     }
 }
 
+static void handleInfoPopup() {
+    if (!infoPopupActive) return;
+    if (millis() - infoPopupStart >= 3000) {
+        infoPopupActive = false;
+        if (menuMode == MenuMode::Main) {
+            drawMenuFrame();
+        } else if (menuMode == MenuMode::ResetMenu) {
+            drawResetMenuFrame();
+        }
+    }
+}
+
 static void handleMenuButtons() {
     if (menuJustOpened) {
         if (!M5.BtnB.isPressed()) {
             menuJustOpened = false;
         }
+        return;
+    }
+    if (infoPopupActive) {
         return;
     }
     
@@ -1013,6 +1169,16 @@ static void handleMenuButtons() {
                     resetHomeUi();
                 }
             } else if (menuIndex == 4) {
+                bool ok = saveSettingsToSd();
+                if (ok) {
+                    ok = loadSettingsFromSd();
+                }
+                showInfoPopup(ok ? "Settings saved" : "Save failed");
+            } else if (menuIndex == 5) {
+                menuMode = MenuMode::ResetMenu;
+                resetMenuIndex = 0;
+                drawResetMenuFrame();
+            } else if (menuIndex == 6) {
                 menuMode = MenuMode::None;
                 resetHomeUi();
             }
@@ -1042,6 +1208,29 @@ static void handleMenuButtons() {
         } else if (M5.BtnB.wasPressed()) {
             menuMode = MenuMode::Main;
             drawMenuFrame();
+        }
+    } else if (menuMode == MenuMode::ResetMenu) {
+        if (M5.BtnA.wasPressed()) {
+            resetMenuIndex = (resetMenuIndex - 1 + (int)resetMenuItemCount) % (int)resetMenuItemCount;
+            drawResetMenuFrame();
+        } else if (M5.BtnC.wasPressed()) {
+            resetMenuIndex = (resetMenuIndex + 1) % (int)resetMenuItemCount;
+            drawResetMenuFrame();
+        } else if (M5.BtnB.wasPressed()) {
+            if (resetMenuIndex == 0) {
+                alertCount = 0;
+                bool ok = saveSettingsToSd();
+                showInfoPopup(ok ? "Alerts reset" : "Save failed");
+            } else if (resetMenuIndex == 1) {
+                applyDefaultSettings();
+                saveSettingsToSd();
+                setDisplayPower(true);
+                menuMode = MenuMode::None;
+                resetHomeUi();
+            } else if (resetMenuIndex == 2) {
+                menuMode = MenuMode::Main;
+                drawMenuFrame();
+            }
         }
     }
 }
@@ -1077,7 +1266,10 @@ static void handleHomeScreen() {
     }
     
     if (!homeScreenActive) return;
-    if (batterySaverEnabled) return;
+    if (batterySaverEnabled) {
+        setDisplayPower(false);
+        return;
+    }
     if (alertActive) return;
     if (menuMode != MenuMode::None) return;
     
@@ -1111,6 +1303,7 @@ void loop() {
         resetHomeUi();
     }
     handleAlertPopup();
+    handleInfoPopup();
     handleVolumeButtons();
     handleMenuButtons();
     handleHomeScreen();
