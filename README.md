@@ -27,6 +27,12 @@ At runtime, FlockSquawk:
 - Experimental: make it easy to modify detection logic and behaviors
 - Modular: allow different hardware front-ends (displays, controls, indicators)
 
+---
+
+## ESP32 Core Version Requirement
+
+Use **esp32 by Espressif Systems** version **3.0.7 or older**. Newer versions fail to compile due to an **IRAM overflow** issue.
+
 
 ---
 
@@ -40,7 +46,16 @@ Current variants:
   A full-featured UI with menus, rotary encoder input, RGB backlight support, and a rich visual interface.
 
 - **128x32 I2C OLED (SSD1306/SH1106)**  
-  A minimal, compact display option suitable for small builds and low-power setups.
+  Compact display option with I2C wiring. Includes a portable buzzer-only build.
+
+- **M5Stack Fire**  
+  Uses the built-in speaker and SD card storage on the M5Stack FIRE.
+
+- **M5StickC Plus2**  
+  Compact handheld variant with buzzer and built-in display.
+
+- **Flipper Zero WiFi Dev Board (ESP32-S2)**  
+  ESP32-S2 firmware that streams UART telemetry to a Flipper Zero app (WiFi only, no BLE).
 
 Each variant is self-contained and can be opened directly in the Arduino IDE.
 
@@ -55,15 +70,34 @@ FlockSquawk/
 │       ├── flocksquawk_mini12864.ino
 │       ├── src/
 │       ├── data/
-│       └── README.md   ← display-specific instructions
-│
+│       └── README.md
 ├── 128x32_OLED/
-│   └── flocksquawk_128x32/
-│       ├── flocksquawk_128x32.ino
+│   ├── flocksquawk_128x32/
+│   │   ├── flocksquawk_128x32.ino
+│   │   ├── src/
+│   │   ├── data/
+│   │   └── README.md
+│   └── flocksquawk_128x32_portable/
+│       ├── flocksquawk_128x32_portable.ino
 │       ├── src/
-│       ├── data/
-│       └── README.md   ← display-specific instructions
-│
+│       └── README.md
+├── m5stack/
+│   ├── flocksquawk_m5fire/
+│   │   ├── flocksquawk_m5fire.ino
+│   │   ├── src/
+│   │   ├── data/
+│   │   └── README.md
+│   └── flocksquawk_m5stick/
+│       ├── flocksquawk_m5stick.ino
+│       ├── src/
+│       └── README.md
+├── flipper-zero/
+│   ├── dev-board-firmware/
+│   │   ├── flocksquawk-flipper/
+│   │   │   └── flocksquawk-flipper.ino
+│   │   └── src/
+│   │       └── ...
+│   └── README.md
 └── README.md   ← you are here (project overview)
 ```
 
@@ -107,4 +141,3 @@ Because of this structure, new interfaces can be added cleanly: displays, LEDs, 
 - ESP32 community for excellent hardware support
 - NimBLE-Arduino for efficient BLE scanning
 - ArduinoJson for flexible JSON handling
-
