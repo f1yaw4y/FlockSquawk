@@ -12,7 +12,7 @@ namespace DeviceProfiles {
         "FLOCK",
         "FS Ext Battery",
         "Penguin",
-        "Pigvision"
+        "Pigvision",
     };
     const size_t NetworkNameCount = sizeof(NetworkNames) / sizeof(NetworkNames[0]);
 
@@ -23,7 +23,7 @@ namespace DeviceProfiles {
         "70:c9:4e", "3c:91:80", "d8:f3:bc", "80:30:49", "14:5a:fc",
         "74:4c:a1", "08:3a:88", "9c:2f:9d", "94:08:53", "e4:aa:ea"
     };
-    const size_t MACPrefixCount = 20;
+    const size_t MACPrefixCount = sizeof(MACPrefixes) / sizeof(MACPrefixes[0]);
 
     // Bluetooth device name patterns
     const char* const BLEIdentifiers[] = {
@@ -32,7 +32,7 @@ namespace DeviceProfiles {
         "Flock",
         "Pigvision"
     };
-    const size_t BLEIdentifierCount = 4;
+    const size_t BLEIdentifierCount = sizeof(BLEIdentifiers) / sizeof(BLEIdentifiers[0]);
 
     // Raven acoustic detection device service UUIDs
     const char* const RavenServices[] = {
@@ -45,7 +45,7 @@ namespace DeviceProfiles {
         "00001809-0000-1000-8000-00805f9b34fb",  // Health/Temp (legacy 1.1.7)
         "00001819-0000-1000-8000-00805f9b34fb"   // Location (legacy 1.1.7)
     };
-    const size_t RavenServiceCount = 8;
+    const size_t RavenServiceCount = sizeof(RavenServices) / sizeof(RavenServices[0]);
 }
 
 #endif
