@@ -37,6 +37,8 @@ A modular, event-driven ESP32 project that passively detects surveillance device
 5. Search for "ESP32" and install "esp32 by Espressif Systems"
 6. Select your ESP32 board: **Tools** → **Board** → **M5Stack Fire**
 
+**Important:** Use **esp32 by Espressif Systems** version **3.0.7 or older**. Newer versions fail to compile due to an **IRAM overflow** issue.
+
 ### Required Libraries
 
 Install the following libraries via Arduino IDE Library Manager:
@@ -62,7 +64,7 @@ The following components are included with ESP32 board support:
 
 ```bash
 git clone <repository-url>
-cd flocksquawk
+cd FlockSquawk-main/m5stack/flocksquawk_m5fire
 ```
 
 Or download as ZIP and extract.
@@ -71,7 +73,7 @@ Or download as ZIP and extract.
 
 1. Open Arduino IDE
 2. Navigate to **File** → **Open**
-3. Select `flocksquawk.ino` from the `flocksquawk` folder
+3. Select `flocksquawk_m5fire.ino` from this folder
 
 ### Step 3: Prepare Audio Files
 
@@ -235,7 +237,7 @@ Detection patterns are defined in `src/DeviceSignatures.h`. Patterns include:
 
 1. **Missing libraries**: Install M5Unified, ArduinoJson, and NimBLE-Arduino
 2. **Wrong board**: Select correct ESP32 board variant
-3. **Outdated ESP32 core**: Update ESP32 board support package
+3. **ESP32 core too new**: Install version **3.0.7 or older** (newer versions hit IRAM overflow)
 4. **File structure**: Ensure all `.h` files are in `src/` directory
 
 ### Upload Failures
@@ -254,8 +256,8 @@ Detection patterns are defined in `src/DeviceSignatures.h`. Patterns include:
 ## Project Structure
 
 ```
-flocksquawk/
-├── flocksquawk.ino             # Main orchestrator
+flocksquawk_m5fire/
+├── flocksquawk_m5fire.ino      # Main orchestrator
 ├── README.md                   # This file
 ├── src/
 │   ├── EventBus.h             # Event system interface
