@@ -2,7 +2,7 @@
 
 ESP32-S2 firmware for the official Flipper Zero WiFi Dev Board. The ESP32-S2
 handles RF scanning and outputs line-based UART messages to a companion Flipper
-Zero app (`flipper_flock_app/`).
+Zero app (`flock_scanner.fap`).
 
 ## Features
 
@@ -45,6 +45,8 @@ These are wired on the official board; no extra wiring is required.
 5. Search for "ESP32" and install "esp32 by Espressif Systems"
 6. Select your ESP32 board: **Tools** → **Board** → **ESP32 Arduino** → **ESP32S2 Dev Module**
 
+**Important:** Use **esp32 by Espressif Systems** version **3.0.7 or older**. Newer versions fail to compile due to an **IRAM overflow** issue.
+
 ### Required Libraries
 
 No additional libraries are required for the ESP32-S2 build.
@@ -62,7 +64,7 @@ The following components are included with ESP32 board support:
 
 ```bash
 git clone <repository-url>
-cd FlockSquawk/flipper-zero/flocksquawk-flipper
+cd FlockSquawk-main/flipper-zero/dev-board-firmware/flocksquawk-flipper
 ```
 
 Or download as ZIP and extract.
@@ -161,7 +163,7 @@ Detection patterns are defined in `src/DeviceSignatures.h`. Patterns include:
 ### Compilation Errors
 
 1. **Wrong board**: Select correct ESP32 board variant
-2. **Outdated ESP32 core**: Update ESP32 board support package
+2. **ESP32 core too new**: Install version **3.0.7 or older** (newer versions hit IRAM overflow)
 3. **File structure**: Ensure all `.h` files are in `src/` directory
 
 ### Upload Failures
@@ -181,18 +183,19 @@ Detection patterns are defined in `src/DeviceSignatures.h`. Patterns include:
 ## Project Structure
 
 ```
-flocksquawk-flipper/
-├── flocksquawk-flipper.ino    # Main orchestrator
-├── README.md                  # This file
-├── flipper_flock_app/         # Flipper Zero external app
-├── src/
-│   ├── EventBus.h             # Event system interface
-│   ├── DeviceSignatures.h     # Detection patterns
-│   ├── RadioScanner.h         # RF scanning interface
-│   ├── ThreatAnalyzer.h       # Detection engine interface
-│   ├── SoundEngine.h          # Legacy audio (unused for Flipper)
-│   └── TelemetryReporter.h    # UART reporting interface
-└── data/                      # Legacy audio assets (unused)
+flipper-zero/
+├── dev-board-firmware/
+│   ├── flocksquawk-flipper/
+│   │   └── flocksquawk-flipper.ino    # Main sketch
+│   └── src/
+│       ├── EventBus.h                 # Event system interface
+│       ├── DeviceSignatures.h         # Detection patterns
+│       ├── RadioScanner.h             # RF scanning interface
+│       ├── ThreatAnalyzer.h           # Detection engine interface
+│       ├── SoundEngine.h              # Legacy audio (unused for Flipper)
+│       └── TelemetryReporter.h        # UART reporting interface
+├── flock_scanner.fap                  # Flipper Zero app (prebuilt)
+└── README.md                          # This file
 ```
 
 ## Architecture
