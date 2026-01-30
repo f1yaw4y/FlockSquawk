@@ -14,7 +14,7 @@ namespace DeviceProfiles {
         "Penguin",
         "Pigvision"
     };
-    const size_t NetworkNameCount = 6;
+    const size_t NetworkNameCount = sizeof(NetworkNames) / sizeof(NetworkNames[0]);
 
     // MAC address OUI prefixes for target devices
     const char* const MACPrefixes[] = {
