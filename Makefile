@@ -74,7 +74,7 @@ define VARIANT_TARGETS
 build-$(1):
 	arduino-cli compile \
 		--fqbn $($(1)_FQBN) \
-		--build-property "build.extra_flags=-I$(COMMON_DIR)" \
+		--build-property "build.defines=-I$(COMMON_DIR)" \
 		--output-dir $(BUILD_DIR)/$(1) \
 		$($(1)_SKETCH)
 
