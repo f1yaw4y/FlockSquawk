@@ -125,6 +125,36 @@ flash:   flash-$(VARIANT)
 monitor: monitor-$(VARIANT)
 
 # ──────────────────────────────────────────────
+# Host-side unit tests (no ESP32 needed)
+# ──────────────────────────────────────────────
+TEST_CXX      ?= clang++
+TEST_CXXFLAGS := -std=c++17 -Wall -Wextra -g -O0
+TEST_INCLUDES := -isystem test/mocks -I m5stack/flocksquawk_m5stick/src -I test
+TEST_SRCS     := test/test_main.cpp test/eventbus_impl.cpp \
+                 test/test_detectors.cpp test/test_device_tracker.cpp \
+                 test/test_threat_analyzer.cpp
+TEST_BIN      := $(BUILD_DIR)/test_runner
+DOCTEST_URL   := https://raw.githubusercontent.com/doctest/doctest/v2.4.11/doctest/doctest.h
+
+.PHONY: test test-verbose fetch-doctest
+
+fetch-doctest: test/doctest.h
+
+test/doctest.h:
+	@echo "Fetching doctest.h …"
+	curl -sL -o $@ $(DOCTEST_URL)
+
+test: fetch-doctest
+	@mkdir -p $(BUILD_DIR)
+	$(TEST_CXX) $(TEST_CXXFLAGS) $(TEST_INCLUDES) $(TEST_SRCS) -o $(TEST_BIN)
+	$(TEST_BIN)
+
+test-verbose: fetch-doctest
+	@mkdir -p $(BUILD_DIR)
+	$(TEST_CXX) $(TEST_CXXFLAGS) $(TEST_INCLUDES) $(TEST_SRCS) -o $(TEST_BIN)
+	$(TEST_BIN) --success
+
+# ──────────────────────────────────────────────
 # Global targets
 # ──────────────────────────────────────────────
 .PHONY: all clean install-deps help
@@ -159,6 +189,8 @@ help:
 	@echo "Global targets:"
 	@echo "  make help              Show this message"
 	@echo "  make all               Compile all variants"
+	@echo "  make test              Run host-side unit tests"
+	@echo "  make test-verbose      Run tests with per-assertion output"
 	@echo "  make clean             Remove build output (.build/)"
 	@echo "  make install-deps      Install ESP32 core and Arduino libraries"
 	@echo ""
