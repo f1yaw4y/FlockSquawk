@@ -8,7 +8,8 @@ enum class EventType {
     WifiFrameCaptured,
     BluetoothDeviceFound,
     ThreatIdentified,
-    SystemReady
+    SystemReady,
+    AudioPlaybackRequested
 };
 
 struct WiFiFrameEvent {
@@ -41,28 +42,36 @@ struct ThreatEvent {
     bool     shouldAlert;
 };
 
+struct AudioEvent {
+    const char* soundFile;
+};
+
 class EventBus {
 public:
     typedef std::function<void(const WiFiFrameEvent&)> WiFiFrameHandler;
     typedef std::function<void(const BluetoothDeviceEvent&)> BluetoothHandler;
     typedef std::function<void(const ThreatEvent&)> ThreatHandler;
     typedef std::function<void()> SystemEventHandler;
+    typedef std::function<void(const AudioEvent&)> AudioHandler;
 
     static void publishWifiFrame(const WiFiFrameEvent& event);
     static void publishBluetoothDevice(const BluetoothDeviceEvent& event);
     static void publishThreat(const ThreatEvent& event);
     static void publishSystemReady();
+    static void publishAudioRequest(const AudioEvent& event);
 
     static void subscribeWifiFrame(WiFiFrameHandler handler);
     static void subscribeBluetoothDevice(BluetoothHandler handler);
     static void subscribeThreat(ThreatHandler handler);
     static void subscribeSystemReady(SystemEventHandler handler);
+    static void subscribeAudioRequest(AudioHandler handler);
 
 private:
     static WiFiFrameHandler wifiHandler;
     static BluetoothHandler bluetoothHandler;
     static ThreatHandler threatHandler;
     static SystemEventHandler systemReadyHandler;
+    static AudioHandler audioHandler;
 };
 
 #endif

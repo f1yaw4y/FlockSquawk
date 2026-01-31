@@ -10,6 +10,7 @@ VARIANT      ?= m5stick
 CORE_VERSION ?= 3.0.7
 
 BUILD_DIR    := $(CURDIR)/.build
+COMMON_DIR   := $(CURDIR)/common
 
 # Arduino toolchain paths (Linux default; macOS overrides below)
 ARDUINO_DATA  ?= $(HOME)/.arduino15
@@ -26,7 +27,7 @@ MKLITTLEFS    = $(firstword $(wildcard $(ARDUINO_DATA)/packages/esp32/tools/mkli
 # ──────────────────────────────────────────────
 VARIANTS := m5stick m5fire mini12864 oled portable flipper
 
-m5stick_FQBN   := esp32:esp32:m5stick_c_plus2
+m5stick_FQBN   := esp32:esp32:m5stack_stickc_plus2
 m5stick_SKETCH := m5stack/flocksquawk_m5stick
 m5stick_DATA   :=
 
@@ -73,6 +74,7 @@ define VARIANT_TARGETS
 build-$(1):
 	arduino-cli compile \
 		--fqbn $($(1)_FQBN) \
+		--build-property "build.extra_flags=-I$(COMMON_DIR)" \
 		--output-dir $(BUILD_DIR)/$(1) \
 		$($(1)_SKETCH)
 
@@ -129,7 +131,7 @@ monitor: monitor-$(VARIANT)
 # ──────────────────────────────────────────────
 TEST_CXX      ?= clang++
 TEST_CXXFLAGS := -std=c++17 -Wall -Wextra -g -O0
-TEST_INCLUDES := -isystem test/mocks -I m5stack/flocksquawk_m5stick/src -I test
+TEST_INCLUDES := -isystem test/mocks -I common -I test
 TEST_SRCS     := test/test_main.cpp test/eventbus_impl.cpp \
                  test/test_detectors.cpp test/test_device_tracker.cpp \
                  test/test_threat_analyzer.cpp

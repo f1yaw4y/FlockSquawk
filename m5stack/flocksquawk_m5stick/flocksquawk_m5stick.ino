@@ -13,11 +13,11 @@
 #include "esp_wifi.h"
 #include "esp_wifi_types.h"
 
-#include "src/EventBus.h"
-#include "src/DeviceSignatures.h"
+#include "EventBus.h"
+#include "DeviceSignatures.h"
 #include "src/RadioScanner.h"
-#include "src/ThreatAnalyzer.h"
-#include "src/TelemetryReporter.h"
+#include "ThreatAnalyzer.h"
+#include "TelemetryReporter.h"
 
 // Global system components
 RadioScannerManager rfScanner;
@@ -29,6 +29,7 @@ EventBus::WiFiFrameHandler EventBus::wifiHandler = nullptr;
 EventBus::BluetoothHandler EventBus::bluetoothHandler = nullptr;
 EventBus::ThreatHandler EventBus::threatHandler = nullptr;
 EventBus::SystemEventHandler EventBus::systemReadyHandler = nullptr;
+EventBus::AudioHandler EventBus::audioHandler = nullptr;
 
 namespace {
     const uint16_t STARTUP_BEEP_FREQ = 2000;
@@ -364,6 +365,14 @@ void EventBus::subscribeThreat(ThreatHandler handler) {
 
 void EventBus::subscribeSystemReady(SystemEventHandler handler) {
     systemReadyHandler = handler;
+}
+
+void EventBus::publishAudioRequest(const AudioEvent& event) {
+    if (audioHandler) audioHandler(event);
+}
+
+void EventBus::subscribeAudioRequest(AudioHandler handler) {
+    audioHandler = handler;
 }
 
 // RadioScannerManager implementation

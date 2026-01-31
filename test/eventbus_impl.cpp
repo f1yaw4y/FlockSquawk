@@ -12,6 +12,7 @@ EventBus::WiFiFrameHandler   EventBus::wifiHandler;
 EventBus::BluetoothHandler   EventBus::bluetoothHandler;
 EventBus::ThreatHandler      EventBus::threatHandler;
 EventBus::SystemEventHandler EventBus::systemReadyHandler;
+EventBus::AudioHandler       EventBus::audioHandler;
 
 void EventBus::publishWifiFrame(const WiFiFrameEvent& event) {
     if (wifiHandler) wifiHandler(event);
@@ -37,4 +38,10 @@ void EventBus::subscribeThreat(ThreatHandler handler) {
 }
 void EventBus::subscribeSystemReady(SystemEventHandler handler) {
     systemReadyHandler = handler;
+}
+void EventBus::publishAudioRequest(const AudioEvent& event) {
+    if (audioHandler) audioHandler(event);
+}
+void EventBus::subscribeAudioRequest(AudioHandler handler) {
+    audioHandler = handler;
 }
