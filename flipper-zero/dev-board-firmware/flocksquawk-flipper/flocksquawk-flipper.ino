@@ -4,13 +4,15 @@
 #include <ctype.h>
 #include <stdint.h>
 #define FLOCK_RGB_AVAILABLE 1
+#include "freertos/FreeRTOS.h"
+#include "freertos/portmacro.h"
 #include "esp_wifi.h"
 #include "esp_wifi_types.h"
 
-#include "src/EventBus.h"
-#include "src/DeviceSignatures.h"
+#include "EventBus.h"
+#include "DeviceSignatures.h"
 #include "src/RadioScanner.h"
-#include "src/ThreatAnalyzer.h"
+#include "ThreatAnalyzer.h"
 #include "src/TelemetryReporter.h"
 
 // Global system components
@@ -144,6 +146,17 @@ void EventBus::subscribeSystemReady(SystemEventHandler handler) {
 void EventBus::subscribeAudioRequest(AudioHandler handler) {
     audioHandler = handler;
 }
+
+// Thread-safe deferred event processing
+static portMUX_TYPE wifiMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool wifiFramePending = false;
+static WiFiFrameEvent pendingWiFiFrame;
+static portMUX_TYPE bleMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool bleDevicePending = false;
+static BluetoothDeviceEvent pendingBleDevice;
+static portMUX_TYPE threatMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool threatPending = false;
+static ThreatEvent pendingThreat;
 
 // RadioScannerManager implementation
 void RadioScannerManager::initialize() {
@@ -304,118 +317,6 @@ NimBLEScan* RadioScannerManager::bleScanner = nullptr;
 bool RadioScannerManager::isScanningBLE = false;
 #endif
 
-// ThreatAnalyzer implementation
-void ThreatAnalyzer::initialize() {
-    // Analyzer ready
-}
-
-void ThreatAnalyzer::analyzeWiFiFrame(const WiFiFrameEvent& frame) {
-    bool nameMatch = strlen(frame.ssid) > 0 && matchesNetworkName(frame.ssid);
-    bool macMatch = matchesMACPrefix(frame.mac);
-    
-    if (nameMatch || macMatch) {
-        uint8_t certainty = calculateCertainty(nameMatch, macMatch, false);
-        emitThreatDetection(frame, "wifi", certainty);
-    }
-}
-
-void ThreatAnalyzer::analyzeBluetoothDevice(const BluetoothDeviceEvent& device) {
-    bool nameMatch = strlen(device.name) > 0 && matchesBLEName(device.name);
-    bool macMatch = matchesMACPrefix(device.mac);
-    bool uuidMatch = device.hasServiceUUID && matchesRavenService(device.serviceUUID);
-    
-    if (nameMatch || macMatch || uuidMatch) {
-        uint8_t certainty = calculateCertainty(nameMatch, macMatch, uuidMatch);
-        const char* category = determineCategory(uuidMatch);
-        emitThreatDetection(device, "bluetooth", certainty, category);
-    }
-}
-
-bool ThreatAnalyzer::matchesNetworkName(const char* ssid) {
-    if (!ssid) return false;
-    
-    for (size_t i = 0; i < DeviceProfiles::NetworkNameCount; i++) {
-        if (strcasestr(ssid, DeviceProfiles::NetworkNames[i])) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ThreatAnalyzer::matchesMACPrefix(const uint8_t* mac) {
-    char macStr[9];
-    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x", mac[0], mac[1], mac[2]);
-    
-    for (size_t i = 0; i < DeviceProfiles::MACPrefixCount; i++) {
-        if (strncasecmp(macStr, DeviceProfiles::MACPrefixes[i], 8) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ThreatAnalyzer::matchesBLEName(const char* name) {
-    if (!name) return false;
-    
-    for (size_t i = 0; i < DeviceProfiles::BLEIdentifierCount; i++) {
-        if (strcasestr(name, DeviceProfiles::BLEIdentifiers[i])) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ThreatAnalyzer::matchesRavenService(const char* uuid) {
-    if (!uuid) return false;
-    
-    for (size_t i = 0; i < DeviceProfiles::RavenServiceCount; i++) {
-        if (strcasecmp(uuid, DeviceProfiles::RavenServices[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-uint8_t ThreatAnalyzer::calculateCertainty(bool nameMatch, bool macMatch, bool uuidMatch) {
-    if (nameMatch && macMatch && uuidMatch) return 100;
-    if (nameMatch && macMatch) return 95;
-    if (uuidMatch) return 90;
-    if (nameMatch || macMatch) return 85;
-    return 70;
-}
-
-const char* ThreatAnalyzer::determineCategory(bool isRaven) {
-    return isRaven ? "acoustic_detector" : "surveillance_device";
-}
-
-void ThreatAnalyzer::emitThreatDetection(const WiFiFrameEvent& frame, const char* radio, uint8_t certainty) {
-    ThreatEvent threat;
-    memset(&threat, 0, sizeof(threat));
-    memcpy(threat.mac, frame.mac, 6);
-    strncpy(threat.identifier, frame.ssid, sizeof(threat.identifier) - 1);
-    threat.rssi = frame.rssi;
-    threat.channel = frame.channel;
-    threat.radioType = radio;
-    threat.certainty = certainty;
-    threat.category = "surveillance_device";
-    
-    EventBus::publishThreat(threat);
-}
-
-void ThreatAnalyzer::emitThreatDetection(const BluetoothDeviceEvent& device, const char* radio, uint8_t certainty, const char* category) {
-    ThreatEvent threat;
-    memset(&threat, 0, sizeof(threat));
-    memcpy(threat.mac, device.mac, 6);
-    strncpy(threat.identifier, device.name, sizeof(threat.identifier) - 1);
-    threat.rssi = device.rssi;
-    threat.channel = 0;
-    threat.radioType = radio;
-    threat.certainty = certainty;
-    threat.category = category;
-    
-    EventBus::publishThreat(threat);
-}
-
 // TelemetryReporter implementation
 void TelemetryReporter::initialize() {
     bootTime = millis();
@@ -454,7 +355,7 @@ void TelemetryReporter::emitAlert(const ThreatEvent& threat) {
              threat.mac[3], threat.mac[4], threat.mac[5]);
 
     Serial.printf("ALERT,RSSI=%d,MAC=%s", threat.rssi, macStr);
-    if (threat.radioType) {
+    if (threat.radioType[0] != '\0') {
         Serial.printf(",RADIO=%s", threat.radioType);
     }
     if (threat.channel > 0) {
@@ -505,16 +406,24 @@ void setup() {
 #endif
     
     EventBus::subscribeWifiFrame([](const WiFiFrameEvent& event) {
-        threatEngine.analyzeWiFiFrame(event);
-        reporter.handleWiFiFrameSeen(event);
+        portENTER_CRITICAL(&wifiMux);
+        pendingWiFiFrame = event;
+        wifiFramePending = true;
+        portEXIT_CRITICAL(&wifiMux);
     });
-    
+
     EventBus::subscribeBluetoothDevice([](const BluetoothDeviceEvent& event) {
-        threatEngine.analyzeBluetoothDevice(event);
+        portENTER_CRITICAL(&bleMux);
+        pendingBleDevice = event;
+        bleDevicePending = true;
+        portEXIT_CRITICAL(&bleMux);
     });
-    
+
     EventBus::subscribeThreat([](const ThreatEvent& event) {
-        reporter.handleThreatDetection(event);
+        portENTER_CRITICAL(&threatMux);
+        pendingThreat = event;
+        threatPending = true;
+        portEXIT_CRITICAL(&threatMux);
     });
     
     EventBus::subscribeSystemReady([]() {
@@ -530,6 +439,40 @@ void setup() {
 
 void loop() {
     rfScanner.update();
+    uint32_t now = millis();
+
+    if (wifiFramePending) {
+        WiFiFrameEvent frameCopy;
+        portENTER_CRITICAL(&wifiMux);
+        frameCopy = pendingWiFiFrame;
+        wifiFramePending = false;
+        portEXIT_CRITICAL(&wifiMux);
+        reporter.handleWiFiFrameSeen(frameCopy);
+        threatEngine.analyzeWiFiFrame(frameCopy);
+    }
+
+    if (bleDevicePending) {
+        BluetoothDeviceEvent bleCopy;
+        portENTER_CRITICAL(&bleMux);
+        bleCopy = pendingBleDevice;
+        bleDevicePending = false;
+        portEXIT_CRITICAL(&bleMux);
+        threatEngine.analyzeBluetoothDevice(bleCopy);
+    }
+
+    threatEngine.tick(now);
+
+    if (threatPending) {
+        ThreatEvent threatCopy;
+        portENTER_CRITICAL(&threatMux);
+        threatCopy = pendingThreat;
+        threatPending = false;
+        portEXIT_CRITICAL(&threatMux);
+        if (threatCopy.shouldAlert) {
+            reporter.handleThreatDetection(threatCopy);
+        }
+    }
+
     reporter.update();
 #if FLOCK_TARGET_ESP32S2 && FLOCK_RGB_AVAILABLE
     if (reporter.isAlertActive()) {
