@@ -17,12 +17,23 @@
 #include "DeviceSignatures.h"
 #include "src/RadioScanner.h"
 #include "ThreatAnalyzer.h"
+#include "BleTransport.h"
 #include "TelemetryReporter.h"
+
+// TelemetryReporter::_sendViaBle requires BleTransport to be fully defined.
+// Both headers are now included above, so we can provide the inline definition.
+inline void TelemetryReporter::_sendViaBle(char* buf, size_t len) {
+    if (_bleTransport->isClientConnected()) {
+        buf[len] = '\n';
+        _bleTransport->sendLine(buf, len + 1);
+    }
+}
 
 // Global system components
 RadioScannerManager rfScanner;
 ThreatAnalyzer threatEngine;
 TelemetryReporter reporter;
+BleTransport bleTransport;
 
 // Event bus handler implementations
 EventBus::WiFiFrameHandler EventBus::wifiHandler = nullptr;
@@ -545,7 +556,9 @@ void RadioScannerManager::configureWiFiSniffer() {
 }
 
 void RadioScannerManager::configureBluetoothScanner() {
-    NimBLEDevice::init("");
+    if (!NimBLEDevice::isInitialized()) {
+        NimBLEDevice::init("");
+    }
     bleScanner = NimBLEDevice::getScan();
     bleScanner->setActiveScan(true);
     bleScanner->setInterval(100);
@@ -682,6 +695,9 @@ bool RadioScannerManager::isScanningBLE = false;
 uint16_t RadioScannerManager::CHANNEL_SWITCH_MS = 300;
 uint8_t RadioScannerManager::BLE_SCAN_SECONDS = 2;
 uint32_t RadioScannerManager::BLE_SCAN_INTERVAL_MS = 5000;
+bool RadioScannerManager::_highPerformance = false;
+volatile bool RadioScannerManager::_bleClientConnected = false;
+volatile bool RadioScannerManager::_dutyCycleDirty = false;
 
 
 // Main system initialization
@@ -727,6 +743,17 @@ void setup() {
     
     threatEngine.initialize();
     reporter.initialize();
+
+    // Initialize NimBLE once, then set up GATT server before radio scanner.
+    // RadioScanner::configureBluetoothScanner() will skip NimBLEDevice::init()
+    // if already initialized.
+    NimBLEDevice::init("");
+    bleTransport.setClientStateCallback([](bool connected) {
+        RadioScannerManager::setBleClientConnected(connected);
+    });
+    bleTransport.initialize();
+    reporter.setBleTransport(&bleTransport);
+
     rfScanner.initialize();
     
     Serial.println("System operational - scanning for targets");
@@ -738,6 +765,7 @@ void setup() {
 
 void loop() {
     M5.update();
+    RadioScannerManager::applyPendingDutyCycle();
     rfScanner.update();
     static uint8_t dots = 1;
     static uint32_t lastDotMs = 0;
