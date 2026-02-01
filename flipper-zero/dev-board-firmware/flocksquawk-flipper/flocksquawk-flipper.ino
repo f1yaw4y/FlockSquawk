@@ -317,6 +317,9 @@ unsigned long RadioScannerManager::lastBLEScan = 0;
 NimBLEScan* RadioScannerManager::bleScanner = nullptr;
 bool RadioScannerManager::isScanningBLE = false;
 #endif
+uint16_t RadioScannerManager::CHANNEL_SWITCH_MS = 300;
+uint8_t RadioScannerManager::BLE_SCAN_SECONDS = 2;
+uint32_t RadioScannerManager::BLE_SCAN_INTERVAL_MS = 5000;
 
 // TelemetryReporter implementation
 void TelemetryReporter::initialize() {

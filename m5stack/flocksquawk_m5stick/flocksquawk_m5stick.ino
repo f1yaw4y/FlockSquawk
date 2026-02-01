@@ -528,6 +528,9 @@ unsigned long RadioScannerManager::lastChannelSwitch = 0;
 unsigned long RadioScannerManager::lastBLEScan = 0;
 NimBLEScan* RadioScannerManager::bleScanner = nullptr;
 bool RadioScannerManager::isScanningBLE = false;
+uint16_t RadioScannerManager::CHANNEL_SWITCH_MS = 300;
+uint8_t RadioScannerManager::BLE_SCAN_SECONDS = 2;
+uint32_t RadioScannerManager::BLE_SCAN_INTERVAL_MS = 5000;
 
 
 // Main system initialization
@@ -598,9 +601,22 @@ void loop() {
     static bool wasAlertActive = false;
     static bool powerToggleHandled = false;
     static bool lastShouldPowerSave = false;
+    static bool lastOnExternalPower = false;
+    static uint32_t lastPowerCheckMs = 0;
     uint8_t channel = RadioScannerManager::getCurrentWifiChannel();
     uint32_t now = millis();
-    bool shouldPowerSave = powerSaverEnabled;
+
+    // Check external power periodically and adjust scan/display modes
+    if (now - lastPowerCheckMs >= BATTERY_UPDATE_MS) {
+        bool onExternalPower = M5.Power.isCharging();
+        if (onExternalPower != lastOnExternalPower) {
+            RadioScannerManager::setPerformanceMode(onExternalPower);
+            lastOnExternalPower = onExternalPower;
+        }
+        lastPowerCheckMs = now;
+    }
+
+    bool shouldPowerSave = lastOnExternalPower ? false : powerSaverEnabled;
 
     if (wifiFramePending) {
         WiFiFrameEvent frameCopy;
