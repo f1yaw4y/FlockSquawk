@@ -178,6 +178,35 @@ install-deps:
 		"Adafruit SSD1306"
 
 # ──────────────────────────────────────────────
+# Docker build environment
+# ──────────────────────────────────────────────
+DOCKER_IMAGE ?= flocksquawk-build:latest
+
+.PHONY: docker-build-image docker-build-all docker-build docker-test \
+        docker-test-verbose docker-shell docker-clean
+
+docker-build-image:
+	docker build -t $(DOCKER_IMAGE) .
+
+docker-build-all:
+	docker run --rm -v "$(CURDIR)":/workspace $(DOCKER_IMAGE) make all
+
+docker-build:
+	docker run --rm -v "$(CURDIR)":/workspace $(DOCKER_IMAGE) make build-$(VARIANT)
+
+docker-test:
+	docker run --rm -v "$(CURDIR)":/workspace $(DOCKER_IMAGE) make test
+
+docker-test-verbose:
+	docker run --rm -v "$(CURDIR)":/workspace $(DOCKER_IMAGE) make test-verbose
+
+docker-shell:
+	docker run --rm -it -v "$(CURDIR)":/workspace $(DOCKER_IMAGE) /bin/bash
+
+docker-clean:
+	docker rmi $(DOCKER_IMAGE)
+
+# ──────────────────────────────────────────────
 # Help (default target)
 # ──────────────────────────────────────────────
 .DEFAULT_GOAL := help
@@ -208,6 +237,15 @@ help:
 	@echo "  make upload            => upload-\$$(VARIANT)"
 	@echo "  make flash             => flash-\$$(VARIANT)"
 	@echo "  make monitor           => monitor-\$$(VARIANT)"
+	@echo ""
+	@echo "Docker targets:"
+	@echo "  make docker-build-image  Build the Docker image (all deps pre-baked)"
+	@echo "  make docker-build-all    Compile all variants in container"
+	@echo "  make docker-build        Compile VARIANT in container"
+	@echo "  make docker-test         Run host-side unit tests in container"
+	@echo "  make docker-test-verbose Run verbose tests in container"
+	@echo "  make docker-shell        Interactive shell in container"
+	@echo "  make docker-clean        Remove the Docker image"
 	@echo ""
 	@echo "Variables:"
 	@echo "  PORT=<path>            Serial port  (auto-detected if unset)"

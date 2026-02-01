@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <climits>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 
