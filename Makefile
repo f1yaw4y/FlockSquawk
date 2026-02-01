@@ -2,12 +2,17 @@
 # Usage: make help
 
 # ──────────────────────────────────────────────
+# Dependency versions (shared with Dockerfile)
+# ──────────────────────────────────────────────
+include versions.env
+
+# ──────────────────────────────────────────────
 # User-configurable variables
 # ──────────────────────────────────────────────
 PORT         ?=
 BAUD         ?= 115200
 VARIANT      ?= m5stick
-CORE_VERSION ?= 3.0.7
+CORE_VERSION ?= $(ESP32_CORE_VERSION)
 
 BUILD_DIR    := $(CURDIR)/.build
 COMMON_DIR   := $(CURDIR)/common
@@ -136,7 +141,7 @@ TEST_SRCS     := test/test_main.cpp test/eventbus_impl.cpp \
                  test/test_detectors.cpp test/test_device_tracker.cpp \
                  test/test_threat_analyzer.cpp
 TEST_BIN      := $(BUILD_DIR)/test_runner
-DOCTEST_URL   := https://raw.githubusercontent.com/doctest/doctest/v2.4.11/doctest/doctest.h
+DOCTEST_URL   := https://raw.githubusercontent.com/doctest/doctest/v$(DOCTEST_VERSION)/doctest/doctest.h
 
 .PHONY: test test-verbose fetch-doctest
 
@@ -170,12 +175,12 @@ install-deps:
 	arduino-cli core update-index
 	arduino-cli core install esp32:esp32@$(CORE_VERSION)
 	arduino-cli lib install \
-		ArduinoJson \
-		"NimBLE-Arduino" \
-		M5Unified \
-		U8g2 \
-		"Adafruit GFX Library" \
-		"Adafruit SSD1306"
+		ArduinoJson@$(ARDUINOJSON_VERSION) \
+		"NimBLE-Arduino@$(NIMBLE_VERSION)" \
+		M5Unified@$(M5UNIFIED_VERSION) \
+		U8g2@$(U8G2_VERSION) \
+		"Adafruit GFX Library@$(ADAFRUIT_GFX_VERSION)" \
+		"Adafruit SSD1306@$(ADAFRUIT_SSD1306_VERSION)"
 
 # ──────────────────────────────────────────────
 # Docker build environment
@@ -186,7 +191,18 @@ DOCKER_IMAGE ?= flocksquawk-build:latest
         docker-test-verbose docker-shell docker-clean
 
 docker-build-image:
-	docker build -t $(DOCKER_IMAGE) .
+	docker build -t $(DOCKER_IMAGE) \
+		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
+		--build-arg ARDUINO_CLI_VERSION=$(ARDUINO_CLI_VERSION) \
+		--build-arg ESP32_CORE_VERSION=$(CORE_VERSION) \
+		--build-arg ARDUINOJSON_VERSION=$(ARDUINOJSON_VERSION) \
+		--build-arg NIMBLE_VERSION=$(NIMBLE_VERSION) \
+		--build-arg M5UNIFIED_VERSION=$(M5UNIFIED_VERSION) \
+		--build-arg U8G2_VERSION=$(U8G2_VERSION) \
+		--build-arg ADAFRUIT_GFX_VERSION=$(ADAFRUIT_GFX_VERSION) \
+		--build-arg ADAFRUIT_SSD1306_VERSION=$(ADAFRUIT_SSD1306_VERSION) \
+		--build-arg DOCTEST_VERSION=$(DOCTEST_VERSION) \
+		.
 
 docker-build-all:
 	docker run --rm -v "$(CURDIR)":/workspace $(DOCKER_IMAGE) make all

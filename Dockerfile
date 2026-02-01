@@ -1,10 +1,25 @@
 # FlockSquawk Docker Build Environment
 # All toolchains and libraries pre-baked for zero-install builds.
 #
-# Build:  docker build -t flocksquawk-build:latest .
+# Build:  make docker-build-image            (reads versions.env)
+#    or:  docker build -t flocksquawk-build . (uses ARG defaults below)
 # Run:    docker run --rm -v .:/workspace flocksquawk-build:latest make all
 
-FROM debian:bookworm-slim
+ARG BASE_IMAGE=debian:trixie-slim
+FROM ${BASE_IMAGE}
+
+# ── Dependency versions ──────────────────────────────────────────────
+# Defaults here mirror versions.env.  When building via the Makefile,
+# versions.env is the source of truth and overrides these via --build-arg.
+ARG ARDUINO_CLI_VERSION=1.4.1
+ARG ESP32_CORE_VERSION=3.0.7
+ARG ARDUINOJSON_VERSION=7.4.2
+ARG NIMBLE_VERSION=2.3.7
+ARG M5UNIFIED_VERSION=0.2.11
+ARG U8G2_VERSION=2.35.30
+ARG ADAFRUIT_GFX_VERSION=1.12.4
+ARG ADAFRUIT_SSD1306_VERSION=2.5.16
+ARG DOCTEST_VERSION=2.4.12
 
 # ── 1. System packages ──────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -17,10 +32,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-# ── 2. arduino-cli (pinned latest stable) ───────────────────────────
+# ── 2. arduino-cli ──────────────────────────────────────────────────
 RUN mkdir -p /tmp/acli \
     && cd /tmp/acli \
-    && curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s -- \
+    && curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s -- ${ARDUINO_CLI_VERSION} \
     && mv bin/arduino-cli /usr/local/bin/ \
     && rm -rf /tmp/acli
 
@@ -29,23 +44,24 @@ RUN arduino-cli config init \
     && arduino-cli config add board_manager.additional_urls \
        https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
 
-# ── 4. ESP32 core v3.0.7 (~1.5 GB — includes Xtensa + RISC-V) ─────
+# ── 4. ESP32 core (~1.5 GB — includes Xtensa + RISC-V) ─────────────
+# Pinned to 3.0.7: newer versions cause IRAM overflow on these targets.
 RUN arduino-cli core update-index \
-    && arduino-cli core install esp32:esp32@3.0.7
+    && arduino-cli core install esp32:esp32@${ESP32_CORE_VERSION}
 
-# ── 5. Arduino libraries (version-pinned) ───────────────────────────
+# ── 5. Arduino libraries ────────────────────────────────────────────
 RUN arduino-cli lib install \
-        ArduinoJson@7.3.0 \
-        "NimBLE-Arduino@2.2.1" \
-        M5Unified@0.2.2 \
-        U8g2@2.35.30 \
-        "Adafruit GFX Library@1.12.4" \
-        "Adafruit SSD1306@2.5.13"
+        ArduinoJson@${ARDUINOJSON_VERSION} \
+        "NimBLE-Arduino@${NIMBLE_VERSION}" \
+        M5Unified@${M5UNIFIED_VERSION} \
+        U8g2@${U8G2_VERSION} \
+        "Adafruit GFX Library@${ADAFRUIT_GFX_VERSION}" \
+        "Adafruit SSD1306@${ADAFRUIT_SSD1306_VERSION}"
 
 # ── 6. doctest.h (pre-fetched for host-side tests) ──────────────────
 RUN mkdir -p /opt/flocksquawk-deps \
     && curl -sL -o /opt/flocksquawk-deps/doctest.h \
-       https://raw.githubusercontent.com/doctest/doctest/v2.4.11/doctest/doctest.h
+       https://raw.githubusercontent.com/doctest/doctest/v${DOCTEST_VERSION}/doctest/doctest.h
 
 # ── 7. Core cache warm-up ───────────────────────────────────────────
 # Dummy-compile a minimal sketch against each distinct FQBN so the
