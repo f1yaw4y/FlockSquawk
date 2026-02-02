@@ -139,7 +139,7 @@ TEST_CXXFLAGS := -std=c++17 -Wall -Wextra -g -O0
 TEST_INCLUDES := -isystem test/mocks -I common -I test
 TEST_SRCS     := test/test_main.cpp test/eventbus_impl.cpp \
                  test/test_detectors.cpp test/test_device_tracker.cpp \
-                 test/test_threat_analyzer.cpp
+                 test/test_threat_analyzer.cpp test/test_battery_smoothing.cpp
 TEST_BIN      := $(BUILD_DIR)/test_runner
 DOCTEST_URL   := https://raw.githubusercontent.com/doctest/doctest/v$(DOCTEST_VERSION)/doctest/doctest.h
 

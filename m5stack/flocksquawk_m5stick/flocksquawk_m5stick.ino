@@ -18,6 +18,7 @@
 #include "src/RadioScanner.h"
 #include "ThreatAnalyzer.h"
 #include "BleTransport.h"
+#include "BatterySmoothing.h"
 #include "TelemetryReporter.h"
 
 // TelemetryReporter::_sendViaBle requires BleTransport to be fully defined.
@@ -114,6 +115,16 @@ namespace {
     BluetoothDeviceEvent pendingBleDevice;
     bool statusMessageActive = false;
     uint32_t statusMessageUntilMs = 0;
+
+    // Battery smoothing
+    BatteryFilter batteryFilter;
+    uint32_t lastBatteryReadMs = 0;
+
+    void updateBattery(uint32_t now) {
+        if (now - lastBatteryReadMs < BATTERY_UPDATE_MS) return;
+        lastBatteryReadMs = now;
+        batteryFilter.addSample(M5.Power.getBatteryLevel());
+    }
 
     enum class DisplayState {
         Awake,
@@ -396,7 +407,7 @@ namespace {
             spriteCreated = true;
         }
 
-        drawDeviceListHeader(1, M5.Power.getBatteryLevel(), countActiveDevices());
+        drawDeviceListHeader(1, batteryFilter.smoothed, countActiveDevices());
         drawDeviceList(nowMs);
         displayState = DisplayState::Awake;
         displayStateMs = nowMs;
@@ -758,7 +769,10 @@ void setup() {
     
     Serial.println("System operational - scanning for targets");
     Serial.println();
-    
+
+    // Seed battery smoothing buffer
+    batteryFilter.seed(M5.Power.getBatteryLevel());
+
     initScanningUi(millis());
     EventBus::publishSystemReady();
 }
@@ -776,6 +790,9 @@ void loop() {
     static bool lastOnExternalPower = false;
     static uint32_t lastPowerCheckMs = 0;
     uint32_t now = millis();
+
+    // Update smoothed battery reading (gated by BATTERY_UPDATE_MS internally)
+    updateBattery(now);
 
     // Check external power periodically and adjust scan/display modes
     if (now - lastPowerCheckMs >= BATTERY_UPDATE_MS) {
@@ -824,7 +841,7 @@ void loop() {
         }
         // Immediate list refresh on new detection (if display is awake and not alerting)
         if (!alertActive && !statusMessageActive && displayState == DisplayState::Awake) {
-            drawDeviceListHeader(dots, M5.Power.getBatteryLevel(), countActiveDevices());
+            drawDeviceListHeader(dots, batteryFilter.smoothed, countActiveDevices());
             drawDeviceList(now);
         }
     }
@@ -906,7 +923,7 @@ void loop() {
     // Header updates (dots animation + battery/count)
     if (!isAlerting && !statusMessageActive && displayState == DisplayState::Awake && now - lastDotMs >= DOT_UPDATE_MS) {
         dots = (dots % MAX_DOTS) + 1;
-        drawDeviceListHeader(dots, M5.Power.getBatteryLevel(), countActiveDevices());
+        drawDeviceListHeader(dots, batteryFilter.smoothed, countActiveDevices());
         lastDotMs = now;
     }
 
@@ -914,7 +931,7 @@ void loop() {
     if (!isAlerting && !statusMessageActive && now - lastListRefreshMs >= LIST_REFRESH_MS) {
         ageDisplayDevices(now);
         if (displayState == DisplayState::Awake) {
-            drawDeviceListHeader(dots, M5.Power.getBatteryLevel(), countActiveDevices());
+            drawDeviceListHeader(dots, batteryFilter.smoothed, countActiveDevices());
             drawDeviceList(now);
         }
         lastListRefreshMs = now;
