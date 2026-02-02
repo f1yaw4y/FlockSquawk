@@ -16,6 +16,42 @@ namespace DeviceProfiles {
 
     // Flock Safety (direct OUI registration — high confidence)
     const char* const FlockSafetyOUI = "b4:1e:52";
+
+    // Surveillance camera manufacturers (curated from FlockOff database).
+    // Dedicated security/surveillance companies only.
+    struct SurveillanceOUI {
+        const char* prefix;
+        const char* manufacturer;
+    };
+
+    const SurveillanceOUI SurveillancePrefixes[] = {
+        // Avigilon Alta
+        { "70:1a:d5", "Avigilon Alta" },
+        // Axis Communications
+        { "00:40:8c", "Axis Communications" },
+        { "ac:cc:8e", "Axis Communications" },
+        { "b8:a4:4f", "Axis Communications" },
+        { "e8:27:25", "Axis Communications" },
+        // FLIR Systems
+        { "00:13:56", "FLIR Systems" },
+        { "00:40:7f", "FLIR Systems" },
+        { "00:1b:d8", "FLIR Systems" },
+        // GeoVision
+        { "00:13:e2", "GeoVision" },
+        // Hanwha Vision
+        { "44:b4:23", "Hanwha Vision" },
+        { "8c:1d:55", "Hanwha Vision" },
+        { "e4:30:22", "Hanwha Vision" },
+        // March Networks
+        { "00:10:be", "March Networks" },
+        { "00:12:81", "March Networks" },
+        // Mobotix
+        { "00:03:c5", "Mobotix" },
+        // Sunell Electronics
+        { "00:1c:27", "Sunell Electronics" },
+    };
+    const size_t SurveillancePrefixCount =
+        sizeof(SurveillancePrefixes) / sizeof(SurveillancePrefixes[0]);
 }
 
 #endif

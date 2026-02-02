@@ -421,3 +421,44 @@ TEST_CASE("ThreatAnalyzer: test_flck keyword triggers detection") {
     REQUIRE(threatCount == 1);
     CHECK((lastThreat.matchFlags & DET_SSID_KEYWORD) != 0);
 }
+
+// ============================================================
+// Surveillance camera OUI detection
+// ============================================================
+
+TEST_CASE("ThreatAnalyzer: Axis Communications OUI produces INFO alert") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    // Axis Communications OUI: 00:40:8c
+    auto frame = makeWiFiFrame("AxisCam", -60);
+    frame.mac[0] = 0x00; frame.mac[1] = 0x40; frame.mac[2] = 0x8C;
+    frame.mac[3] = 0x01; frame.mac[4] = 0x02; frame.mac[5] = 0x03;
+    analyzer.analyzeWiFiFrame(frame);
+    REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_INFO);
+    CHECK((lastThreat.matchFlags & DET_SURVEILLANCE_OUI) != 0);
+    CHECK(strcmp(lastThreat.category, "surveillance_camera") == 0);
+    CHECK(lastThreat.shouldAlert == false);
+    // Verify weight stored at correct bit position (was an OOB bug when array was [8])
+    CHECK(lastThreat.detectorWeights[detectorBitPosition(DET_SURVEILLANCE_OUI)] == 30);
+}
+
+TEST_CASE("ThreatAnalyzer: BLE Hanwha Vision OUI produces INFO alert") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    // Hanwha Vision OUI: 44:b4:23
+    auto device = makeBLEDevice("", -60);
+    device.mac[0] = 0x44; device.mac[1] = 0xB4; device.mac[2] = 0x23;
+    device.mac[3] = 0x01; device.mac[4] = 0x02; device.mac[5] = 0x03;
+    analyzer.analyzeBluetoothDevice(device);
+    REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_INFO);
+    CHECK((lastThreat.matchFlags & DET_SURVEILLANCE_OUI) != 0);
+    CHECK(strcmp(lastThreat.category, "surveillance_camera") == 0);
+}

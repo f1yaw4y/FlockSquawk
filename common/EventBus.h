@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <functional>
+#include "DetectorTypes.h"
 
 enum class EventType {
     WifiFrameCaptured,
@@ -37,9 +38,9 @@ struct ThreatEvent {
     uint8_t certainty;
     char category[24];
     uint16_t matchFlags;
-    uint8_t  detectorWeights[8];
+    uint8_t  detectorWeights[MAX_DETECTOR_WEIGHTS];
     int8_t   rssiModifier;
-    uint8_t  alertLevel;      // AlertLevel enum value
+    AlertLevel alertLevel;
     bool     firstDetection;  // true when device was not previously tracked
     bool     shouldAlert;
 };

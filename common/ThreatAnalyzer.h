@@ -12,20 +12,22 @@
 // ============================================================
 
 static const WiFiDetectorEntry wifiDetectors[] = {
-    { detectSsidFormat,  DET_SSID_FORMAT  },
-    { detectSsidKeyword, DET_SSID_KEYWORD },
-    { detectWifiMacOui,  DET_MAC_OUI      },
-    { detectFlockOui,    DET_FLOCK_OUI    },
+    { detectSsidFormat,       DET_SSID_FORMAT      },
+    { detectSsidKeyword,      DET_SSID_KEYWORD     },
+    { detectWifiMacOui,       DET_MAC_OUI          },
+    { detectFlockOui,         DET_FLOCK_OUI        },
+    { detectSurveillanceOui,  DET_SURVEILLANCE_OUI },
 };
 static const uint8_t WIFI_DETECTOR_COUNT =
     sizeof(wifiDetectors) / sizeof(wifiDetectors[0]);
 
 static const BLEDetectorEntry bleDetectors[] = {
-    { detectBleName,         DET_BLE_NAME          },
-    { detectRavenCustomUuid, DET_RAVEN_CUSTOM_UUID },
-    { detectRavenStdUuid,    DET_RAVEN_STD_UUID    },
-    { detectBleMacOui,       DET_MAC_OUI           },
-    { detectBleFlockOui,     DET_FLOCK_OUI         },
+    { detectBleName,              DET_BLE_NAME          },
+    { detectRavenCustomUuid,      DET_RAVEN_CUSTOM_UUID },
+    { detectRavenStdUuid,         DET_RAVEN_STD_UUID    },
+    { detectBleMacOui,            DET_MAC_OUI           },
+    { detectBleFlockOui,          DET_FLOCK_OUI         },
+    { detectBleSurveillanceOui,   DET_SURVEILLANCE_OUI  },
 };
 static const uint8_t BLE_DETECTOR_COUNT =
     sizeof(bleDetectors) / sizeof(bleDetectors[0]);
@@ -175,7 +177,7 @@ public:
 
     void analyzeWiFiFrame(const WiFiFrameEvent& frame) {
         uint16_t matchFlags = 0;
-        uint8_t weights[8];
+        uint8_t weights[MAX_DETECTOR_WEIGHTS];
         memset(weights, 0, sizeof(weights));
         int16_t totalWeight = 0;
 
@@ -212,7 +214,9 @@ public:
         threat.channel         = frame.channel;
         strncpy(threat.radioType, "wifi", sizeof(threat.radioType) - 1);
         threat.certainty       = certainty;
-        strncpy(threat.category, "surveillance_device", sizeof(threat.category) - 1);
+        const char* wifiCat = (matchFlags & DET_SURVEILLANCE_OUI)
+            ? "surveillance_camera" : "surveillance_device";
+        strncpy(threat.category, wifiCat, sizeof(threat.category) - 1);
         threat.matchFlags      = matchFlags | DET_RSSI_MODIFIER;
         memcpy(threat.detectorWeights, weights, sizeof(weights));
         threat.rssiModifier    = rssiMod;
@@ -226,7 +230,7 @@ public:
 
     void analyzeBluetoothDevice(const BluetoothDeviceEvent& device) {
         uint16_t matchFlags = 0;
-        uint8_t weights[8];
+        uint8_t weights[MAX_DETECTOR_WEIGHTS];
         memset(weights, 0, sizeof(weights));
         int16_t totalWeight = 0;
 
@@ -252,10 +256,13 @@ public:
         DeviceState prevState = tracker.recordDetection(
             device.mac, nowMs, level);
 
-        const char* cat =
-            (matchFlags & (DET_RAVEN_CUSTOM_UUID | DET_RAVEN_STD_UUID))
-                ? "acoustic_detector"
-                : "surveillance_device";
+        const char* cat;
+        if (matchFlags & (DET_RAVEN_CUSTOM_UUID | DET_RAVEN_STD_UUID))
+            cat = "acoustic_detector";
+        else if (matchFlags & DET_SURVEILLANCE_OUI)
+            cat = "surveillance_camera";
+        else
+            cat = "surveillance_device";
 
         ThreatEvent threat;
         memset(&threat, 0, sizeof(threat));

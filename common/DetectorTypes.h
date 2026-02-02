@@ -26,6 +26,9 @@ enum DetectorFlag : uint16_t {
     DET_SURVEILLANCE_OUI  = (1 << 8),
 };
 
+// Number of detector weight slots — one per DetectorFlag bit position.
+static const uint8_t MAX_DETECTOR_WEIGHTS = 9;
+
 // Forward declarations (defined in EventBus.h)
 struct WiFiFrameEvent;
 struct BluetoothDeviceEvent;

@@ -191,6 +191,34 @@ inline DetectorResult detectBleFlockOui(const BluetoothDeviceEvent& device) {
 }
 
 // ============================================================
+// Surveillance Camera OUI Detectors
+// ============================================================
+
+inline bool ouiMatchesSurveillance(const uint8_t* mac) {
+    char macStr[9];
+    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x", mac[0], mac[1], mac[2]);
+    for (size_t i = 0; i < DeviceProfiles::SurveillancePrefixCount; i++) {
+        if (strncasecmp(macStr, DeviceProfiles::SurveillancePrefixes[i].prefix, 8) == 0)
+            return true;
+    }
+    return false;
+}
+
+// WiFi Surveillance Camera OUI Match (weight 30)
+inline DetectorResult detectSurveillanceOui(const WiFiFrameEvent& frame) {
+    DetectorResult r = { false, 30, "surveillance_oui" };
+    if (ouiMatchesSurveillance(frame.mac)) r.matched = true;
+    return r;
+}
+
+// BLE Surveillance Camera OUI Match (weight 30)
+inline DetectorResult detectBleSurveillanceOui(const BluetoothDeviceEvent& device) {
+    DetectorResult r = { false, 30, "surveillance_oui" };
+    if (ouiMatchesSurveillance(device.mac)) r.matched = true;
+    return r;
+}
+
+// ============================================================
 // RSSI Modifier
 // ============================================================
 

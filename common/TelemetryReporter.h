@@ -47,7 +47,7 @@ public:
             "rssi_modifier", "flock_oui", "surveillance_oui"
         };
 
-        for (uint8_t bit = 0; bit < 9; bit++) {
+        for (uint8_t bit = 0; bit < MAX_DETECTOR_WEIGHTS; bit++) {
             if (threat.matchFlags & (1 << bit)) {
                 if (bit == 6) {
                     // rssi_modifier is signed
