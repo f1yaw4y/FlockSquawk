@@ -1,8 +1,8 @@
 # FlockSquawk (Flipper Zero WiFi Dev Board)
 
-ESP32-S2 firmware for the official Flipper Zero WiFi Dev Board. The ESP32-S2
-handles RF scanning and outputs line-based UART messages to a companion Flipper
-Zero app (`flock_scanner.fap`).
+ESP32-S2 firmware for the official Flipper Zero WiFi Dev Board. The ESP32-S2 handles RF scanning and outputs line-based UART messages to a companion Flipper Zero app (`flock_scanner.fap`).
+
+> Note: ESP32-S2 does not support Bluetooth/BLE, so BLE scanning is disabled.
 
 ## Features
 
@@ -11,8 +11,6 @@ Zero app (`flock_scanner.fap`).
 - **UART Telemetry**: Line-based serial protocol for the Flipper app
 - **Event-Driven Architecture**: Modular design for easy extension
 
-> Note: ESP32-S2 does not support Bluetooth/BLE, so BLE scanning is disabled.
-
 ## Hardware Requirements
 
 - **Flipper Zero**
@@ -20,94 +18,47 @@ Zero app (`flock_scanner.fap`).
 - **USB-C cable** (for flashing the ESP32-S2)
 
 ### UART Pins (ESP32-S2)
+
 The WiFi Dev Board routes ESP32-S2 UART0 to the Flipper GPIO header:
 - **TX** = GPIO43
 - **RX** = GPIO44
 
 These are wired on the official board; no extra wiring is required.
 
-## Software Setup
+## Setup
 
-### Prerequisites
+For Arduino IDE installation and ESP32 board support, see [Getting Started](../docs/getting-started.md).
 
-1. **Arduino IDE** (version 1.8.19 or later, or Arduino IDE 2.x)
-2. **ESP32 Board Support** installed in Arduino IDE
+### Libraries
 
-### Installing ESP32 Board Support
-
-1. Open Arduino IDE
-2. Go to **File** → **Preferences**
-3. In "Additional Boards Manager URLs", add:
-   ```
-   https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-   ```
-4. Go to **Tools** → **Board** → **Boards Manager**
-5. Search for "ESP32" and install "esp32 by Espressif Systems"
-6. Select your ESP32 board: **Tools** → **Board** → **ESP32 Arduino** → **ESP32S2 Dev Module**
-
-**Important:** Use **esp32 by Espressif Systems** version **3.0.7 or older**. Newer versions fail to compile due to an **IRAM overflow** issue.
-
-### Required Libraries
-
-No additional libraries are required for the ESP32-S2 build.
+No additional libraries are required for the ESP32-S2 build (NimBLE is not used).
 
 If your Arduino-ESP32 core does not provide `esp32-hal-neopixel.h`, install:
-- **Adafruit NeoPixel** (used as a fallback for the onboard RGB LED)
+- **Adafruit NeoPixel** (fallback for the onboard RGB LED)
 
-### Additional ESP32 Tools
-The following components are included with ESP32 board support:
-- WiFi (built-in)
+### Board Settings
 
-## Installation from GitHub
+1. Select board: **Tools** > **Board** > **ESP32S2 Dev Module**
+2. Upload speed: **115200** (or lower if upload fails)
+3. CPU frequency: **240MHz (WiFi/BT)**
+4. Partition scheme: **Default 4MB with spiffs** or **Huge APP (3MB No OTA/1MB SPIFFS)**
 
-### Step 1: Clone or Download Repository
+### Upload
 
-```bash
-git clone <repository-url>
-cd FlockSquawk-main/flipper-zero/dev-board-firmware/flocksquawk-flipper
-```
-
-Or download as ZIP and extract.
-
-### Step 2: Open Project in Arduino IDE
-
-1. Open Arduino IDE
-2. Navigate to **File** → **Open**
-3. Select `flocksquawk-flipper.ino` from the `flocksquawk-flipper` folder
-
-### Step 3: Configure Board Settings
-
-1. Select your board: **Tools** → **Board** → **ESP32 Arduino** → **ESP32S2 Dev Module**
-2. Set upload speed: **Tools** → **Upload Speed** → **115200** (or lower if upload fails)
-3. Set CPU frequency: **Tools** → **CPU Frequency** → **240MHz (WiFi/BT)**
-4. Set partition scheme: **Tools** → **Partition Scheme** → **Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)** or **Huge APP (3MB No OTA/1MB SPIFFS)**
-
-### Step 4: Upload Code
-
-1. Connect ESP32 via USB
-2. Select the correct port: **Tools** → **Port** → Select your ESP32 port
-3. Click **Upload** button (or **Sketch** → **Upload**)
-4. Wait for compilation and upload to complete
-
-### Step 5: Monitor Serial Output
-
-1. Open Serial Monitor: **Tools** → **Serial Monitor**
-2. Set baud rate to **115200**
-3. Set line ending to **Newline**
-4. You should see status lines and detection events
+1. Connect ESP32-S2 via USB-C
+2. Select port: **Tools** > **Port**
+3. Click **Upload**
 
 ## Usage
 
 ### Basic Operation
 
-1. Power on the ESP32
-2. The system will:
-   - Initialize WiFi sniffer
-   - Begin scanning for targets
+1. Seat the WiFi Dev Board on the Flipper GPIO header
+2. Power on -- the ESP32-S2 initializes WiFi scanning automatically
 
-### Serial Output (UART Protocol)
+### UART Protocol
 
-Line-based, newline-terminated messages:
+Line-based, newline-terminated messages (see [Telemetry Format](../docs/telemetry-format.md) for full details):
 
 ```
 STATUS,SCANNING
@@ -119,65 +70,22 @@ CLEAR
 
 The Flipper app consumes these lines directly.
 
-### RGB LED Behavior (ESP32-S2)
-The onboard RGB LED is used for quick status feedback:
+### RGB LED Behavior
+
+The onboard RGB LED provides status feedback:
 - Boot: cycles red/green/blue
 - Scanning: flashes blue
 - Alert: solid red
 
-The official WiFi Dev Board uses a **discrete RGB LED** (active-low) on:
-- **R** = GPIO6
-- **G** = GPIO5
-- **B** = GPIO4
+LED pins (discrete RGB, active-low): R=GPIO6, G=GPIO5, B=GPIO4.
 
-## Configuration
-
-### WiFi Channel Hopping
-
-Default: Channels 1-13, switching every 500ms
-
-To modify, edit `src/RadioScanner.h`:
-```cpp
-static const uint8_t MAX_WIFI_CHANNEL = 13;
-static const uint16_t CHANNEL_SWITCH_MS = 500;
-```
-
-### Detection Patterns
-
-Detection patterns are defined in `src/DeviceSignatures.h`. Patterns include:
-- Network SSID names
-- MAC address prefixes (OUI)
-
-> BLE identifiers remain in `DeviceSignatures.h` for non-S2 builds, but are not
-> used on the ESP32-S2 WiFi Dev Board.
-
-## Troubleshooting
-
-### No Detections
-
-1. **Check serial output**: Verify system initialized correctly
-2. **Test with known device**: Use a smartphone with WiFi hotspot named "Flock"
-3. **Check channel**: WiFi channel hopping may miss brief transmissions
-4. **Verify patterns**: Check `DeviceSignatures.h` matches your target devices
-
-### Compilation Errors
-
-1. **Wrong board**: Select correct ESP32 board variant
-2. **ESP32 core too new**: Install version **3.0.7 or older** (newer versions hit IRAM overflow)
-3. **File structure**: Ensure all `.h` files are in `src/` directory
-
-### Upload Failures
-
-1. **Hold BOOT button**: Hold BOOT button while clicking Upload, release after upload starts
-2. **Lower upload speed**: Change to 115200 or 9600 baud
-3. **Check USB cable**: Use a data cable, not charge-only
-4. **Driver issues**: Install ESP32 USB drivers (CP210x or CH340)
+## Variant-Specific Troubleshooting
 
 ### Flipper App Not Receiving UART
 
 1. **Confirm baud rate**: 115200
-2. **Confirm app**: `flipper_flock_app` installed
-3. **Check cables**: Dev board seated properly on Flipper GPIO header
+2. **Confirm app**: `flipper_flock_app` installed on the Flipper
+3. **Check seating**: Dev board seated properly on Flipper GPIO header
 4. **Check protocol**: Use serial monitor to verify line-based output
 
 ## Project Structure
@@ -185,72 +93,29 @@ Detection patterns are defined in `src/DeviceSignatures.h`. Patterns include:
 ```
 flipper-zero/
 ├── dev-board-firmware/
-│   ├── flocksquawk-flipper/
-│   │   └── flocksquawk-flipper.ino    # Main sketch
-│   └── src/
-│       ├── EventBus.h                 # Event system interface
-│       ├── DeviceSignatures.h         # Detection patterns
-│       ├── RadioScanner.h             # RF scanning interface
-│       ├── ThreatAnalyzer.h           # Detection engine interface
-│       ├── SoundEngine.h              # Legacy audio (unused for Flipper)
-│       └── TelemetryReporter.h        # UART reporting interface
-├── flock_scanner.fap                  # Flipper Zero app (prebuilt)
-└── README.md                          # This file
+│   └── flocksquawk-flipper/
+│       ├── flocksquawk-flipper.ino    # Main sketch
+│       └── src/
+│           ├── RadioScanner.h          # Variant-specific RF scanning
+│           ├── SoundEngine.h           # Stub (no audio on Flipper)
+│           └── TelemetryReporter.h     # UART line-based reporter
+├── flock_scanner.fap                   # Flipper Zero app (prebuilt)
+└── README.md
 ```
 
-## Architecture
+Shared headers (`EventBus.h`, `ThreatAnalyzer.h`, `Detectors.h`, etc.) are in [`common/`](../common/).
 
-The system uses an event-driven architecture:
+## Further Reading
 
-```
-RadioScannerManager → WiFi Events → EventBus
-                                       ↓
-                                ThreatAnalyzer
-                                       ↓
-                                 Threat Events
-                                       ↓
-                               TelemetryReporter
-                                       ↓
-                                 UART Output
-```
-
-## Extending the System
-
-### Adding New Detection Patterns
-
-Edit `src/DeviceSignatures.h`:
-```cpp
-const char* const NetworkNames[] = {
-    "flock",
-    "YourNewPattern",  // Add here
-    // ...
-};
-```
-
-### Adding Display Support
-
-Subscribe to `ThreatHandler` in `setup()`:
-```cpp
-EventBus::subscribeThreat([](const ThreatEvent& event) {
-    display.showThreat(event);  // Your display code
-});
-```
-
-### Adding LED Indicators
-
-Subscribe to events and control GPIO:
-```cpp
-EventBus::subscribeThreat([](const ThreatEvent& event) {
-    digitalWrite(LED_PIN, HIGH);
-    delay(500);
-    digitalWrite(LED_PIN, LOW);
-});
-```
+- [Configuration](../docs/configuration.md) -- WiFi tuning, detection patterns
+- [Architecture](../docs/architecture.md) -- pipeline, detectors, thread safety
+- [Extending](../docs/extending.md) -- adding detectors, patterns, new variants
+- [Build System](../docs/build-system.md) -- Makefile and Docker builds
+- [Troubleshooting](../docs/troubleshooting.md) -- common issues
 
 ## License
 
 [GNU GENERAL PUBLIC LICENSE](https://github.com/f1yaw4y/FlockSquawk/blob/main/LICENSE)
-
 
 ## Acknowledgments
 
