@@ -332,21 +332,22 @@ void RadioScannerManager::wifiPacketHandler(void* buffer, wifi_promiscuous_pkt_t
     uint8_t frameSubtype = (header->frameControl & 0x00F0) >> 4;
     
     bool isProbeRequest = (frameSubtype == 0x04);
+    bool isProbeResponse = (frameSubtype == 0x05);
     bool isBeacon = (frameSubtype == 0x08);
-    
-    if (!isProbeRequest && !isBeacon) return;
-    
+
+    if (!isProbeRequest && !isProbeResponse && !isBeacon) return;
+
     WiFiFrameEvent event;
     memset(&event, 0, sizeof(event));
-    
+
     memcpy(event.mac, header->source, 6);
     event.rssi = packet->rx_ctrl.rssi;
     event.frameSubtype = frameSubtype;
     event.channel = RadioScannerManager::currentWifiChannel;
-    
+
     const uint8_t* payload = rawData + sizeof(WiFi80211Header);
-    
-    if (isBeacon) {
+
+    if (isBeacon || isProbeResponse) {
         payload += 12;
     }
     
