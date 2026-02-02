@@ -1,0 +1,28 @@
+services:
+  build-all:
+    image: flocksquawk-build:latest
+    volumes:
+      - .:/workspace
+    command: make all
+
+  test:
+    image: flocksquawk-build:latest
+    volumes:
+      - .:/workspace
+    command: make test
+
+  shell:
+    image: flocksquawk-build:latest
+    volumes:
+      - .:/workspace
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+
+  build-variant:
+    image: flocksquawk-build:latest
+    volumes:
+      - .:/workspace
+    environment:
+      - VARIANT=${VARIANT:-m5stick}
+    command: sh -c 'make build-$$VARIANT'

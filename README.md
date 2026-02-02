@@ -33,31 +33,37 @@ At runtime, FlockSquawk:
 
 Use **esp32 by Espressif Systems** version **3.0.7 or older**. Newer versions fail to compile due to an **IRAM overflow** issue.
 
-
 ---
 
-## Display Variants
+## Hardware Variants
 
 FlockSquawk supports multiple hardware front-ends. Each variant lives in its own folder and includes its **own dedicated README with wiring and setup instructions**.
 
-Current variants:
-
-- **Mini12864 (ST7567 LCD + Encoder)**  
-  A full-featured UI with menus, rotary encoder input, RGB backlight support, and a rich visual interface.
-
-- **128x32 I2C OLED (SSD1306/SH1106)**  
-  Compact display option with I2C wiring. Includes a portable buzzer-only build.
-
-- **M5Stack Fire**  
-  Uses the built-in speaker and SD card storage on the M5Stack FIRE.
-
-- **M5StickC Plus2**  
-  Compact handheld variant with buzzer and built-in display.
-
-- **Flipper Zero WiFi Dev Board (ESP32-S2)**  
-  ESP32-S2 firmware that streams UART telemetry to a Flipper Zero app (WiFi only, no BLE).
+| Variant | Path | Display | Audio |
+|---------|------|---------|-------|
+| [M5StickC Plus2](m5stack/flocksquawk_m5stick/README.md) | `m5stack/flocksquawk_m5stick/` | Built-in TFT | Buzzer tones |
+| [M5Stack FIRE](m5stack/flocksquawk_m5fire/README.md) | `m5stack/flocksquawk_m5fire/` | Built-in TFT | Built-in speaker |
+| [Mini12864](Mini12864/flocksquawk_mini12864/README.md) | `Mini12864/flocksquawk_mini12864/` | ST7567 LCD 128x64 | I2S (MAX98357A) |
+| [128x32 OLED](128x32_OLED/flocksquawk_128x32/README.md) | `128x32_OLED/flocksquawk_128x32/` | SSD1306/SH1106 I2C | I2S (MAX98357A) |
+| [128x32 Portable](128x32_OLED/flocksquawk_128x32_portable/README.md) | `128x32_OLED/flocksquawk_128x32_portable/` | SSD1306/SH1106 I2C | GPIO buzzer |
+| [Flipper Zero](flipper-zero/README.md) | `flipper-zero/dev-board-firmware/` | None (UART) | None |
 
 Each variant is self-contained and can be opened directly in the Arduino IDE.
+
+---
+
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Getting Started](docs/getting-started.md) | Arduino IDE setup, ESP32 board support, shared libraries |
+| [Architecture](docs/architecture.md) | Pipeline, event types, detector system, thread safety |
+| [Build System](docs/build-system.md) | Makefile, Docker, arduino-cli, versions.env |
+| [Configuration](docs/configuration.md) | WiFi/BLE tuning, detection patterns, audio/volume |
+| [Telemetry Format](docs/telemetry-format.md) | JSON schema reference, Flipper UART protocol |
+| [Testing](docs/testing.md) | Host-side doctest tests, mocks, running tests |
+| [Extending](docs/extending.md) | Adding detectors, patterns, subscribers, new variants |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues: compilation, upload, no detections |
 
 ---
 
@@ -65,43 +71,27 @@ Each variant is self-contained and can be opened directly in the Arduino IDE.
 
 ```
 FlockSquawk/
-├── Mini12864/
-│   └── flocksquawk_mini12864/
-│       ├── flocksquawk_mini12864.ino
-│       ├── src/
-│       ├── data/
-│       └── README.md
-├── 128x32_OLED/
-│   ├── flocksquawk_128x32/
-│   │   ├── flocksquawk_128x32.ino
-│   │   ├── src/
-│   │   ├── data/
-│   │   └── README.md
-│   └── flocksquawk_128x32_portable/
-│       ├── flocksquawk_128x32_portable.ino
-│       ├── src/
-│       └── README.md
+├── common/                          # Shared headers (EventBus, Detectors, ThreatAnalyzer, ...)
+├── docs/                            # Project-wide documentation
 ├── m5stack/
-│   ├── flocksquawk_m5fire/
-│   │   ├── flocksquawk_m5fire.ino
-│   │   ├── src/
-│   │   ├── data/
-│   │   └── README.md
-│   └── flocksquawk_m5stick/
-│       ├── flocksquawk_m5stick.ino
-│       ├── src/
-│       └── README.md
+│   ├── flocksquawk_m5stick/         # M5StickC Plus2 variant
+│   └── flocksquawk_m5fire/          # M5Stack FIRE variant
+├── Mini12864/
+│   └── flocksquawk_mini12864/       # Mini12864 LCD variant
+├── 128x32_OLED/
+│   ├── flocksquawk_128x32/          # 128x32 OLED + I2S audio variant
+│   └── flocksquawk_128x32_portable/ # 128x32 OLED + buzzer variant
 ├── flipper-zero/
-│   ├── dev-board-firmware/
-│   │   ├── flocksquawk-flipper/
-│   │   │   └── flocksquawk-flipper.ino
-│   │   └── src/
-│   │       └── ...
-│   └── README.md
-└── README.md   ← you are here (project overview)
+│   ├── dev-board-firmware/          # Flipper Zero ESP32-S2 firmware
+│   └── flock_scanner.fap           # Flipper Zero companion app
+├── test/                            # Host-side unit tests
+├── Makefile                         # Build automation
+├── Dockerfile                       # Reproducible build environment
+├── versions.env                     # Pinned dependency versions
+└── README.md                        # This file
 ```
 
-If you are trying to build the project, start by entering one of the variant folders and follow that README.
+If you are trying to build the project, start by entering one of the variant folders and follow that README, or see [Getting Started](docs/getting-started.md).
 
 ---
 
@@ -109,23 +99,13 @@ If you are trying to build the project, start by entering one of the variant fol
 
 All variants share the same core subsystems:
 
-- **RadioScannerManager**  
-  Handles WiFi promiscuous mode and BLE scanning
+- **RadioScannerManager** -- Handles WiFi promiscuous mode and BLE scanning
+- **ThreatAnalyzer** -- Compares observed data against signature patterns
+- **EventBus** -- Lightweight publish/subscribe system connecting components
+- **SoundEngine** -- I2S-based WAV playback or buzzer tones (variant-specific)
+- **TelemetryReporter** -- Emits structured JSON output over Serial
 
-- **ThreatAnalyzer**  
-  Compares observed data against signature patterns
-
-- **EventBus**  
-  Lightweight publish/subscribe system connecting components
-
-- **SoundEngine**  
-  I2S-based WAV playback using LittleFS
-
-- **TelemetryReporter**  
-  Emits structured JSON output over Serial
-
-Because of this structure, new interfaces can be added cleanly: displays, LEDs, network reporting, logging, etc.
-
+Because of this structure, new interfaces can be added cleanly: displays, LEDs, network reporting, logging, etc. See [Architecture](docs/architecture.md) for details.
 
 ---
 
