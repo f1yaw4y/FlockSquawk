@@ -36,17 +36,12 @@ namespace {
     const uint16_t ALERT_BEEP_FREQ = 2600;
     const uint16_t BEEP_DURATION_MS = 80;
     const uint16_t BEEP_GAP_MS = 60;
-    const uint16_t RADAR_LINE_COLOR = TFT_GREEN;
     const uint16_t STATUS_TEXT_COLOR = TFT_WHITE;
     const uint32_t DOT_UPDATE_MS = 400;
     const uint32_t BATTERY_UPDATE_MS = 3000;
-    const uint32_t SWEEP_UPDATE_MS = 10;
     const uint8_t MAX_DOTS = 3;
-    const uint32_t RSSI_UPDATE_MS = 300;
-    const int8_t RSSI_MIN_DBM = -100;
-    const int8_t RSSI_MAX_DBM = -20;
-    const uint8_t RSSI_HISTORY_LEN = 80;
-    const uint16_t RSSI_LINE_COLOR = TFT_CYAN;
+    const uint32_t LIST_REFRESH_MS = 2000;
+    const uint32_t DEVICE_DEPART_MS = 90000;
     const uint32_t ALERT_DURATION_MS = 4000;
     const uint32_t ALERT_FLASH_MS = 300;
     const uint16_t ALERT_BEEP_MS = 180;
@@ -62,10 +57,34 @@ namespace {
         }
     }
 
-    int8_t rssiHistory[RSSI_HISTORY_LEN];
-    uint8_t rssiIndex = 0;
-    bool rssiHistoryInitialized = false;
-    int8_t latestRssi = RSSI_MIN_DBM;
+    // Device list display
+    const uint8_t LIST_HEADER_H = 16;
+    const uint8_t LIST_SEPARATOR_Y = 16;
+    const uint8_t LIST_TOP_Y = 17;
+    const uint8_t LIST_AREA_H = 116;   // 17..132 = 116px
+    const uint8_t LIST_ROW_H = 14;
+    const uint8_t LIST_VISIBLE_ROWS = 8;
+    const uint8_t LIST_SCROLL_BAR_H = 2;
+    const uint8_t MAX_DISPLAY_DEVICES = 32;
+
+    struct DisplayDevice {
+        uint8_t  mac[6];
+        char     label[21];
+        int8_t   rssi;
+        uint8_t  alertLevel;
+        char     radioType;
+        uint32_t firstSeenMs;
+        uint32_t lastSeenMs;
+        bool     active;
+    };
+
+    DisplayDevice displayDevices[MAX_DISPLAY_DEVICES];
+    uint8_t displayDeviceCount = 0;
+    uint8_t scrollOffset = 0;
+    LGFX_Sprite* listSprite = nullptr;
+    LGFX_Sprite* headerSprite = nullptr;
+    bool spriteCreated = false;
+
     bool alertActive = false;
     bool alertVisible = false;
     uint32_t alertStartMs = 0;
@@ -94,12 +113,6 @@ namespace {
     DisplayState displayState = DisplayState::Awake;
     uint32_t displayStateMs = 0;
 
-    int16_t graphTop() {
-        int16_t lineHeight = M5.Display.fontHeight();
-        return (lineHeight * 2) + 4 + 2;
-    }
-
-
     void setDisplayOn() {
         M5.Display.wakeup();
         M5.Display.setBrightness(DISPLAY_BRIGHTNESS_ON);
@@ -108,63 +121,6 @@ namespace {
     void setDisplayOff() {
         M5.Display.setBrightness(0);
         M5.Display.sleep();
-    }
-
-    void ensureRssiHistoryInitialized() {
-        if (rssiHistoryInitialized) {
-            return;
-        }
-        for (uint8_t i = 0; i < RSSI_HISTORY_LEN; i++) {
-            rssiHistory[i] = -70;
-        }
-        rssiIndex = 0;
-        rssiHistoryInitialized = true;
-    }
-
-    void addRssiSample(int8_t rssi) {
-        ensureRssiHistoryInitialized();
-        if (rssi < RSSI_MIN_DBM) rssi = RSSI_MIN_DBM;
-        if (rssi > RSSI_MAX_DBM) rssi = RSSI_MAX_DBM;
-        rssiHistory[rssiIndex] = rssi;
-        rssiIndex = (rssiIndex + 1) % RSSI_HISTORY_LEN;
-    }
-
-    void drawRssiChart() {
-        int16_t top = graphTop();
-        int16_t bottom = M5.Display.height() - 1;
-        if (bottom <= top + 6) return;
-
-        int16_t width = M5.Display.width();
-        int16_t height = bottom - top;
-
-        M5.Display.fillRect(0, top, width, height, TFT_BLACK);
-        M5.Display.drawRect(0, top, width, height, TFT_WHITE);
-
-        int16_t plotTop = top + 1;
-        int16_t plotBottom = bottom - 1;
-        int16_t plotHeight = plotBottom - plotTop;
-
-        int16_t lastX = -1;
-        int16_t lastY = -1;
-        for (uint8_t i = 0; i < RSSI_HISTORY_LEN; i++) {
-            uint8_t idx = (rssiIndex + i) % RSSI_HISTORY_LEN;
-            int16_t x = (int32_t)i * (width - 3) / (RSSI_HISTORY_LEN - 1) + 1;
-            int16_t rssi = rssiHistory[idx];
-            int32_t norm = (int32_t)(rssi - RSSI_MIN_DBM) * (plotHeight - 1) / (RSSI_MAX_DBM - RSSI_MIN_DBM);
-            int16_t y = plotBottom - norm;
-            if (lastX >= 0) {
-                M5.Display.drawLine(lastX, lastY, x, y, RSSI_LINE_COLOR);
-            }
-            lastX = x;
-            lastY = y;
-        }
-    }
-
-    void drawGraphBox() {
-        int16_t top = graphTop();
-        int16_t bottom = M5.Display.height() - 1;
-        int16_t height = bottom - top + 1;
-        M5.Display.drawRect(0, top, M5.Display.width(), height, TFT_WHITE);
     }
 
     uint16_t batteryColor(uint8_t percent) {
@@ -177,65 +133,260 @@ namespace {
         return TFT_GREEN;
     }
 
-    void drawBatteryPercent(uint8_t percent) {
-        char text[8];
-        snprintf(text, sizeof(text), "%u%%", percent);
-        int16_t textWidth = M5.Display.textWidth(text);
-        int16_t height = M5.Display.fontHeight();
-        int16_t x = M5.Display.width() - textWidth;
-        M5.Display.fillRect(x - 2, 0, textWidth + 2, height, TFT_BLACK);
-        M5.Display.setCursor(x, 0);
-        M5.Display.setTextColor(batteryColor(percent), TFT_BLACK);
-        M5.Display.print(text);
+    // --- Device list management ---
+
+    void updateDisplayDevice(const ThreatEvent& threat, uint32_t nowMs) {
+        if (threat.alertLevel == ALERT_NONE) return;
+
+        // Find existing device by MAC
+        for (uint8_t i = 0; i < displayDeviceCount; i++) {
+            if (memcmp(displayDevices[i].mac, threat.mac, 6) == 0) {
+                displayDevices[i].rssi = threat.rssi;
+                displayDevices[i].lastSeenMs = nowMs;
+                displayDevices[i].active = true;
+                if (threat.alertLevel > displayDevices[i].alertLevel) {
+                    displayDevices[i].alertLevel = threat.alertLevel;
+                }
+                // Update label if we got a better identifier
+                if (threat.identifier[0] != '\0') {
+                    strncpy(displayDevices[i].label, threat.identifier, 20);
+                    displayDevices[i].label[20] = '\0';
+                }
+                return;
+            }
+        }
+
+        // Add new device
+        uint8_t slot = displayDeviceCount;
+        if (displayDeviceCount >= MAX_DISPLAY_DEVICES) {
+            // Evict oldest inactive device, or oldest overall
+            uint32_t oldestMs = UINT32_MAX;
+            slot = 0;
+            for (uint8_t i = 0; i < MAX_DISPLAY_DEVICES; i++) {
+                if (!displayDevices[i].active && displayDevices[i].lastSeenMs < oldestMs) {
+                    oldestMs = displayDevices[i].lastSeenMs;
+                    slot = i;
+                }
+            }
+            if (oldestMs == UINT32_MAX) {
+                // All active — evict oldest active
+                for (uint8_t i = 0; i < MAX_DISPLAY_DEVICES; i++) {
+                    if (displayDevices[i].lastSeenMs < oldestMs) {
+                        oldestMs = displayDevices[i].lastSeenMs;
+                        slot = i;
+                    }
+                }
+            }
+        } else {
+            displayDeviceCount++;
+        }
+
+        DisplayDevice& dev = displayDevices[slot];
+        memcpy(dev.mac, threat.mac, 6);
+        dev.rssi = threat.rssi;
+        dev.alertLevel = threat.alertLevel;
+        dev.radioType = (threat.radioType[0] == 'B') ? 'B' : 'W';
+        dev.firstSeenMs = nowMs;
+        dev.lastSeenMs = nowMs;
+        dev.active = true;
+
+        if (threat.identifier[0] != '\0') {
+            strncpy(dev.label, threat.identifier, 20);
+            dev.label[20] = '\0';
+        } else {
+            snprintf(dev.label, sizeof(dev.label), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     threat.mac[0], threat.mac[1], threat.mac[2],
+                     threat.mac[3], threat.mac[4], threat.mac[5]);
+        }
     }
 
-    void drawDetectionCount(uint32_t count) {
-        char text[12];
-        snprintf(text, sizeof(text), "%u", count);
-        int16_t textWidth = M5.Display.textWidth(text);
-        int16_t height = M5.Display.fontHeight();
-        int16_t x = M5.Display.width() - textWidth;
-        int16_t y = height + 2;
-        M5.Display.fillRect(x - 2, y, textWidth + 2, height, TFT_BLACK);
-        M5.Display.setCursor(x, y);
-        M5.Display.setTextColor(RADAR_LINE_COLOR, TFT_BLACK);
-        M5.Display.print(text);
+    void ageDisplayDevices(uint32_t nowMs) {
+        for (uint8_t i = 0; i < displayDeviceCount; i++) {
+            if (displayDevices[i].active && (nowMs - displayDevices[i].lastSeenMs) >= DEVICE_DEPART_MS) {
+                displayDevices[i].active = false;
+            }
+        }
     }
 
-    void drawBatteryArea(uint8_t percent, uint32_t count) {
-        drawBatteryPercent(percent);
-        drawDetectionCount(count);
+    uint8_t countActiveDevices() {
+        uint8_t count = 0;
+        for (uint8_t i = 0; i < displayDeviceCount; i++) {
+            if (displayDevices[i].active) count++;
+        }
+        return count;
     }
 
-    void drawStatusText(uint8_t channel, uint8_t dots) {
-        char text[16];
-        char dotText[4] = "...";
-        dotText[dots] = '\0';
-        snprintf(text, sizeof(text), "Scanning%s", dotText);
+    void buildSortedIndices(uint8_t* indices, uint8_t& count) {
+        count = displayDeviceCount;
+        for (uint8_t i = 0; i < count; i++) indices[i] = i;
 
-        int16_t lineHeight = M5.Display.fontHeight();
-        int16_t width = M5.Display.width();
-        int16_t statusHeight = (lineHeight * 2) + 4;
-
-        M5.Display.fillRect(0, 0, width, statusHeight, TFT_BLACK);
-        M5.Display.setCursor(0, 0);
-        M5.Display.setTextColor(STATUS_TEXT_COLOR, TFT_BLACK);
-        M5.Display.print(text);
-        M5.Display.setCursor(0, lineHeight + 4);
-        M5.Display.setTextColor(STATUS_TEXT_COLOR, TFT_BLACK);
-        M5.Display.printf("WiFi ch: %u", channel);
+        // Simple insertion sort: active first, then by alertLevel desc, then by lastSeenMs desc
+        for (uint8_t i = 1; i < count; i++) {
+            uint8_t key = indices[i];
+            const DisplayDevice& keyDev = displayDevices[key];
+            int8_t j = i - 1;
+            while (j >= 0) {
+                const DisplayDevice& jDev = displayDevices[indices[j]];
+                bool swap = false;
+                if (keyDev.active && !jDev.active) {
+                    swap = true;
+                } else if (keyDev.active == jDev.active) {
+                    if (keyDev.alertLevel > jDev.alertLevel) {
+                        swap = true;
+                    } else if (keyDev.alertLevel == jDev.alertLevel) {
+                        if (keyDev.lastSeenMs > jDev.lastSeenMs) {
+                            swap = true;
+                        }
+                    }
+                }
+                if (!swap) break;
+                indices[j + 1] = indices[j];
+                j--;
+            }
+            indices[j + 1] = key;
+        }
     }
 
-    void initScanningUi(uint8_t channel, uint32_t nowMs) {
+    // --- Drawing functions ---
+
+    uint16_t alertColor(uint8_t level) {
+        switch (level) {
+            case ALERT_CONFIRMED:  return TFT_RED;
+            case ALERT_SUSPICIOUS: return TFT_YELLOW;
+            case ALERT_INFO:       return TFT_CYAN;
+            default:               return TFT_DARKGREY;
+        }
+    }
+
+    void formatAge(uint32_t ms, char* buf, uint8_t bufSize) {
+        uint32_t secs = ms / 1000;
+        if (secs < 60) {
+            snprintf(buf, bufSize, "%us", (unsigned)secs);
+        } else if (secs < 3600) {
+            snprintf(buf, bufSize, "%um", (unsigned)(secs / 60));
+        } else {
+            snprintf(buf, bufSize, "%uh", (unsigned)(secs / 3600));
+        }
+    }
+
+    void drawDeviceListHeader(uint8_t dots, uint8_t battery, uint8_t activeCount) {
+        if (!spriteCreated) return;
+
+        headerSprite->fillSprite(TFT_BLACK);
+        headerSprite->setTextSize(2);
+
+        // Left: "Scan..." with animated dots
+        char scanText[12];
+        char dotStr[4] = "...";
+        dotStr[dots] = '\0';
+        snprintf(scanText, sizeof(scanText), "Scan%s", dotStr);
+        headerSprite->setCursor(0, 0);
+        headerSprite->setTextColor(STATUS_TEXT_COLOR, TFT_BLACK);
+        headerSprite->print(scanText);
+
+        // Right: "B:85% D:3"
+        char rightText[16];
+        snprintf(rightText, sizeof(rightText), "B:%u%% D:%u", battery, activeCount);
+        int16_t textWidth = headerSprite->textWidth(rightText);
+        headerSprite->setCursor(240 - textWidth, 0);
+        headerSprite->setTextColor(batteryColor(battery), TFT_BLACK);
+        headerSprite->print(rightText);
+
+        // Separator line at bottom of header sprite
+        headerSprite->drawFastHLine(0, LIST_SEPARATOR_Y, 240, TFT_DARKGREY);
+
+        headerSprite->pushSprite(0, 0);
+    }
+
+    void drawDeviceList(uint32_t nowMs) {
+        if (!spriteCreated) return;
+
+        uint8_t sortedIdx[MAX_DISPLAY_DEVICES];
+        uint8_t sortedCount = 0;
+        buildSortedIndices(sortedIdx, sortedCount);
+
+        // Clamp scroll offset
+        if (sortedCount <= LIST_VISIBLE_ROWS) {
+            scrollOffset = 0;
+        } else if (scrollOffset > sortedCount - LIST_VISIBLE_ROWS) {
+            scrollOffset = sortedCount - LIST_VISIBLE_ROWS;
+        }
+
+        listSprite->fillSprite(TFT_BLACK);
+        listSprite->setTextSize(1);
+
+        if (sortedCount == 0) {
+            listSprite->setTextColor(TFT_DARKGREY);
+            listSprite->setCursor(20, (LIST_AREA_H - LIST_SCROLL_BAR_H) / 2 - 4);
+            listSprite->print("No devices detected");
+            listSprite->pushSprite(0, LIST_TOP_Y);
+            return;
+        }
+
+        uint8_t rowsAvailable = LIST_AREA_H - LIST_SCROLL_BAR_H;
+        for (uint8_t row = 0; row < LIST_VISIBLE_ROWS && (scrollOffset + row) < sortedCount; row++) {
+            const DisplayDevice& dev = displayDevices[sortedIdx[scrollOffset + row]];
+            int16_t y = row * LIST_ROW_H;
+            uint16_t color = dev.active ? alertColor(dev.alertLevel) : TFT_DARKGREY;
+
+            // Color dot (4x8)
+            listSprite->fillRect(0, y + 3, 4, 8, color);
+
+            // Radio type
+            listSprite->setTextColor(color, TFT_BLACK);
+            listSprite->setCursor(6, y + 3);
+            listSprite->print(dev.radioType);
+
+            // Label (truncated)
+            listSprite->setCursor(18, y + 3);
+            listSprite->print(dev.label);
+
+            // RSSI
+            char rssiStr[8];
+            snprintf(rssiStr, sizeof(rssiStr), "%ddB", dev.rssi);
+            int16_t rssiWidth = listSprite->textWidth(rssiStr);
+            listSprite->setCursor(195 - rssiWidth, y + 3);
+            listSprite->print(rssiStr);
+
+            // Age
+            char ageStr[6];
+            uint32_t ageMs = nowMs - dev.firstSeenMs;
+            formatAge(ageMs, ageStr, sizeof(ageStr));
+            int16_t ageWidth = listSprite->textWidth(ageStr);
+            listSprite->setCursor(240 - ageWidth - 1, y + 3);
+            listSprite->print(ageStr);
+        }
+
+        // Scroll indicator bar
+        if (sortedCount > LIST_VISIBLE_ROWS) {
+            int16_t barY = rowsAvailable;
+            int16_t barWidth = (int32_t)LIST_VISIBLE_ROWS * 240 / sortedCount;
+            if (barWidth < 10) barWidth = 10;
+            int16_t barX = (int32_t)scrollOffset * (240 - barWidth) / (sortedCount - LIST_VISIBLE_ROWS);
+            listSprite->fillRect(barX, barY, barWidth, LIST_SCROLL_BAR_H, TFT_DARKGREY);
+        }
+
+        listSprite->pushSprite(0, LIST_TOP_Y);
+    }
+
+    void initScanningUi(uint32_t nowMs) {
         setDisplayOn();
         M5.Display.clear(TFT_BLACK);
         M5.Display.setTextColor(STATUS_TEXT_COLOR, TFT_BLACK);
         M5.Display.setTextSize(2);
-        drawStatusText(channel, 1);
-        drawBatteryArea(M5.Power.getBatteryLevel(), detectionCount);
-        ensureRssiHistoryInitialized();
-        drawRssiChart();
-        drawGraphBox();
+
+        if (!spriteCreated) {
+            headerSprite = new LGFX_Sprite(&M5.Display);
+            headerSprite->setColorDepth(16);
+            headerSprite->createSprite(240, LIST_TOP_Y);
+            listSprite = new LGFX_Sprite(&M5.Display);
+            listSprite->setColorDepth(16);
+            listSprite->createSprite(240, LIST_AREA_H);
+            spriteCreated = true;
+        }
+
+        drawDeviceListHeader(1, M5.Power.getBatteryLevel(), countActiveDevices());
+        drawDeviceList(nowMs);
         displayState = DisplayState::Awake;
         displayStateMs = nowMs;
     }
@@ -581,29 +732,21 @@ void setup() {
     Serial.println("System operational - scanning for targets");
     Serial.println();
     
-    initScanningUi(RadioScannerManager::getCurrentWifiChannel(), millis());
+    initScanningUi(millis());
     EventBus::publishSystemReady();
 }
 
 void loop() {
     M5.update();
     rfScanner.update();
-    static uint8_t lastChannel = 0;
-    static uint8_t lastBattery = 255;
     static uint8_t dots = 1;
-    static int16_t sweepX = 0;
-    static int16_t lastSweepX = -1;
-    static int8_t sweepDir = 1;
     static uint32_t lastDotMs = 0;
-    static uint32_t lastBatteryMs = 0;
-    static uint32_t lastSweepMs = 0;
-    static uint32_t lastRssiMs = 0;
+    static uint32_t lastListRefreshMs = 0;
     static bool wasAlertActive = false;
     static bool powerToggleHandled = false;
     static bool lastShouldPowerSave = false;
     static bool lastOnExternalPower = false;
     static uint32_t lastPowerCheckMs = 0;
-    uint8_t channel = RadioScannerManager::getCurrentWifiChannel();
     uint32_t now = millis();
 
     // Check external power periodically and adjust scan/display modes
@@ -624,7 +767,6 @@ void loop() {
         frameCopy = pendingWiFiFrame;
         wifiFramePending = false;
         portEXIT_CRITICAL(&wifiMux);
-        latestRssi = frameCopy.rssi;
         threatEngine.analyzeWiFiFrame(frameCopy);
     }
 
@@ -637,9 +779,7 @@ void loop() {
         threatEngine.analyzeBluetoothDevice(bleCopy);
     }
 
-    if (threatEngine.tick(now)) {
-        M5.Speaker.tone(1800, 40);
-    }
+    threatEngine.tick(now);
 
     if (threatPending) {
         ThreatEvent threatCopy;
@@ -648,10 +788,32 @@ void loop() {
         threatPending = false;
         portEXIT_CRITICAL(&threatMux);
         reporter.handleThreatDetection(threatCopy);
+        updateDisplayDevice(threatCopy, now);
         if (threatCopy.shouldAlert) {
             triggerAlert(now);
         } else if (threatCopy.alertLevel == ALERT_SUSPICIOUS && threatCopy.firstDetection) {
             M5.Speaker.tone(1800, 60);
+        }
+        // Immediate list refresh on new detection (if display is awake and not alerting)
+        if (!alertActive && !statusMessageActive && displayState == DisplayState::Awake) {
+            drawDeviceListHeader(dots, M5.Power.getBatteryLevel(), countActiveDevices());
+            drawDeviceList(now);
+        }
+    }
+
+    // Scroll buttons — before the long-press handler
+    if (M5.BtnPWR.wasClicked() && !alertActive && !statusMessageActive && displayState == DisplayState::Awake) {
+        if (scrollOffset > 0) {
+            scrollOffset--;
+            drawDeviceList(now);
+        }
+    }
+
+    if (M5.BtnB.wasClicked() && !alertActive && !statusMessageActive && displayState == DisplayState::Awake) {
+        uint8_t total = displayDeviceCount;
+        if (total > LIST_VISIBLE_ROWS && scrollOffset < total - LIST_VISIBLE_ROWS) {
+            scrollOffset++;
+            drawDeviceList(now);
         }
     }
 
@@ -668,13 +830,9 @@ void loop() {
     }
 
     if (M5.BtnA.wasPressed() && shouldPowerSave) {
-        initScanningUi(channel, now);
-        lastChannel = channel;
+        initScanningUi(now);
         lastDotMs = now;
-        lastBatteryMs = now;
-        lastSweepMs = now;
-        lastRssiMs = now;
-        lastSweepX = -1;
+        lastListRefreshMs = now;
     }
 
     bool isAlerting = updateAlert(now);
@@ -687,33 +845,21 @@ void loop() {
             setDisplayOff();
             displayState = DisplayState::Off;
         } else {
-            initScanningUi(channel, now);
-            lastChannel = channel;
+            initScanningUi(now);
             lastDotMs = now;
-            lastBatteryMs = now;
-            lastSweepMs = now;
-            lastRssiMs = now;
-            lastSweepX = -1;
+            lastListRefreshMs = now;
         }
     }
     wasAlertActive = isAlerting;
 
     if (statusMessageActive && now >= statusMessageUntilMs) {
         statusMessageActive = false;
-        if (shouldPowerSave) {
-            initScanningUi(channel, now);
-        } else {
-            initScanningUi(channel, now);
-        }
+        initScanningUi(now);
     }
 
     if (!isAlerting && !statusMessageActive && shouldPowerSave != lastShouldPowerSave) {
         lastShouldPowerSave = shouldPowerSave;
-        if (shouldPowerSave) {
-            initScanningUi(channel, now);
-        } else {
-            initScanningUi(channel, now);
-        }
+        initScanningUi(now);
     }
 
     if (!isAlerting && !statusMessageActive) {
@@ -725,61 +871,26 @@ void loop() {
                 displayState = DisplayState::Off;
             }
         } else if (displayState != DisplayState::Awake) {
-            initScanningUi(channel, now);
+            initScanningUi(now);
         }
     }
 
-    if (!isAlerting && !statusMessageActive && displayState == DisplayState::Awake && channel != lastChannel) {
-        drawStatusText(channel, dots);
-        drawBatteryArea(M5.Power.getBatteryLevel(), detectionCount);
-        lastChannel = channel;
-    }
-
+    // Header updates (dots animation + battery/count)
     if (!isAlerting && !statusMessageActive && displayState == DisplayState::Awake && now - lastDotMs >= DOT_UPDATE_MS) {
         dots = (dots % MAX_DOTS) + 1;
-        drawStatusText(channel, dots);
-        drawBatteryArea(M5.Power.getBatteryLevel(), detectionCount);
+        drawDeviceListHeader(dots, M5.Power.getBatteryLevel(), countActiveDevices());
         lastDotMs = now;
     }
 
-    if (!isAlerting && !statusMessageActive && displayState == DisplayState::Awake && now - lastBatteryMs >= BATTERY_UPDATE_MS) {
-        uint8_t battery = M5.Power.getBatteryLevel();
-        if (battery != lastBattery) {
-            drawBatteryArea(battery, detectionCount);
-            lastBattery = battery;
-        }
-        lastBatteryMs = now;
-    }
-
-    if (!isAlerting && !statusMessageActive && now - lastRssiMs >= RSSI_UPDATE_MS) {
-        addRssiSample(latestRssi);
+    // Periodic device list refresh — age devices and redraw
+    if (!isAlerting && !statusMessageActive && now - lastListRefreshMs >= LIST_REFRESH_MS) {
+        ageDisplayDevices(now);
         if (displayState == DisplayState::Awake) {
-            drawRssiChart();
-            drawGraphBox();
+            drawDeviceListHeader(dots, M5.Power.getBatteryLevel(), countActiveDevices());
+            drawDeviceList(now);
         }
-        lastRssiMs = now;
+        lastListRefreshMs = now;
     }
 
-    if (!isAlerting && !statusMessageActive && displayState == DisplayState::Awake && now - lastSweepMs >= SWEEP_UPDATE_MS) {
-        int16_t width = M5.Display.width();
-        int16_t height = M5.Display.height();
-        int16_t sweepTopValue = graphTop();
-
-        if (lastSweepX >= 0) {
-            M5.Display.drawLine(lastSweepX, sweepTopValue, lastSweepX, height - 1, TFT_BLACK);
-        }
-        drawGraphBox();
-
-        M5.Display.drawLine(sweepX, sweepTopValue, sweepX, height - 1, RADAR_LINE_COLOR);
-        lastSweepX = sweepX;
-
-        sweepX += sweepDir;
-        if (sweepX <= 0 || sweepX >= width - 1) {
-            sweepDir = -sweepDir;
-            sweepX += sweepDir;
-        }
-
-        lastSweepMs = now;
-    }
     delay(30);
 }
