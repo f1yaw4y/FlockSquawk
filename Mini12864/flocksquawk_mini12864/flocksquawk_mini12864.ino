@@ -433,6 +433,8 @@ void loop() {
             AudioEvent audioEvent;
             audioEvent.soundFile = "/alert.wav";
             EventBus::publishAudioRequest(audioEvent);
+        } else if (threatCopy.alertLevel == ALERT_SUSPICIOUS && threatCopy.firstDetection) {
+            Mini12864DisplayShowAlert();
         }
     }
 

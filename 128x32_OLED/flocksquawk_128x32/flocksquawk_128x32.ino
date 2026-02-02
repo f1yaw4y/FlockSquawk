@@ -563,6 +563,8 @@ void loop() {
             EventBus::publishAudioRequest(audioEvent);
         }
     }
+    // SUSPICIOUS events are captured via telemetry; display-only variants
+    // show them through the normal DisplayEngine state machine.
 
     displaySystem.update();
     delay(100);

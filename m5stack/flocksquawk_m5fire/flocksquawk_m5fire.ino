@@ -1167,7 +1167,11 @@ void loop() {
         threatPending = false;
         portEXIT_CRITICAL(&threatMux);
         reporter.handleThreatDetection(threatCopy);
-        if (threatCopy.shouldAlert) triggerAlert(true);
+        if (threatCopy.shouldAlert) {
+            triggerAlert(true);
+        } else if (threatCopy.alertLevel == ALERT_SUSPICIOUS && threatCopy.firstDetection) {
+            M5.Speaker.tone(1800, 60);
+        }
     }
 
 #if ENABLE_HOME_UI

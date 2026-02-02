@@ -39,6 +39,8 @@ struct ThreatEvent {
     uint16_t matchFlags;
     uint8_t  detectorWeights[8];
     int8_t   rssiModifier;
+    uint8_t  alertLevel;      // AlertLevel enum value
+    bool     firstDetection;  // true when device was not previously tracked
     bool     shouldAlert;
 };
 

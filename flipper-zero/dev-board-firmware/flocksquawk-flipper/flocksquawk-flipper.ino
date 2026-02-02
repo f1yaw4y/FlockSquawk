@@ -469,9 +469,7 @@ void loop() {
         threatCopy = pendingThreat;
         threatPending = false;
         portEXIT_CRITICAL(&threatMux);
-        if (threatCopy.shouldAlert) {
-            reporter.handleThreatDetection(threatCopy);
-        }
+        reporter.handleThreatDetection(threatCopy);
     }
 
     reporter.update();

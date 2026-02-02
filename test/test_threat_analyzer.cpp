@@ -53,7 +53,7 @@ static BluetoothDeviceEvent makeBLEDevice(const char* name = "",
 }
 
 // ============================================================
-// WiFi scoring
+// WiFi basic detection
 // ============================================================
 
 TEST_CASE("ThreatAnalyzer: WiFi SSID format match produces threat") {
@@ -79,51 +79,26 @@ TEST_CASE("ThreatAnalyzer: WiFi no-match produces no threat") {
     CHECK(threatCount == 0);
 }
 
-TEST_CASE("ThreatAnalyzer: WiFi subsumption removes keyword weight") {
-    // "Flock-a1b2c3" matches both SSID_FORMAT (75) and SSID_KEYWORD (45).
-    // Subsumption should remove the keyword weight.
-    ThreatAnalyzer analyzer;
-    analyzer.initialize();
-    resetCapture();
-    mock_millis_value = 5000;
-
-    // RSSI -60 → rssiModifier = 0
-    analyzer.analyzeWiFiFrame(makeWiFiFrame("Flock-a1b2c3", -60));
-    REQUIRE(threatCount == 1);
-    // Should be 75 (format) + 0 (rssi) = 75, NOT 75+45=120
-    CHECK(lastThreat.certainty == 75);
-    // SSID_KEYWORD flag should be cleared
-    CHECK((lastThreat.matchFlags & DET_SSID_KEYWORD) == 0);
-    CHECK((lastThreat.matchFlags & DET_SSID_FORMAT) != 0);
-}
-
 TEST_CASE("ThreatAnalyzer: WiFi RSSI modifier applied") {
     ThreatAnalyzer analyzer;
     analyzer.initialize();
     resetCapture();
     mock_millis_value = 5000;
 
-    // "Flock-a1b2c3" at RSSI -30 → format=75, rssi=+10 → 85
     auto frame = makeWiFiFrame("Flock-a1b2c3", -30);
-    // Give unique MAC to avoid hitting existing device
     frame.mac[5] = 0x10;
     analyzer.analyzeWiFiFrame(frame);
     REQUIRE(threatCount == 1);
-    CHECK(lastThreat.certainty == 85);
     CHECK(lastThreat.rssiModifier == 10);
 }
 
 TEST_CASE("ThreatAnalyzer: WiFi certainty clamped to 100") {
-    // Keyword-only at very close range: 45 + 10 = 55 (no clamp needed)
-    // But let's verify format + OUI + close range doesn't exceed 100:
-    // format=75, OUI=20, rssi=+10 = 105 → clamped to 100
     ThreatAnalyzer analyzer;
     analyzer.initialize();
     resetCapture();
     mock_millis_value = 5000;
 
     auto frame = makeWiFiFrame("Flock-a1b2c3", -30);
-    // Set a known OUI
     frame.mac[0] = 0x58; frame.mac[1] = 0x8E; frame.mac[2] = 0x81;
     frame.mac[3] = 0x99; frame.mac[4] = 0x99; frame.mac[5] = 0x99;
     analyzer.analyzeWiFiFrame(frame);
@@ -131,30 +106,121 @@ TEST_CASE("ThreatAnalyzer: WiFi certainty clamped to 100") {
     CHECK(lastThreat.certainty == 100);
 }
 
-TEST_CASE("ThreatAnalyzer: WiFi certainty clamped to 0 minimum") {
-    // Keyword alone (45) at very weak signal (-90 → -10) = 35
-    // That's still positive. Use OUI alone (20) at -90 → 20-10 = 10.
-    // Can't easily get negative with existing detectors, but verify >= 0.
+// ============================================================
+// WiFi alert level tiers
+// ============================================================
+
+TEST_CASE("ThreatAnalyzer: SSID format match is CONFIRMED") {
     ThreatAnalyzer analyzer;
     analyzer.initialize();
     resetCapture();
     mock_millis_value = 5000;
 
-    // MAC OUI match only (weight 20) at RSSI -90 → 20 + (-10) = 10
-    auto frame = makeWiFiFrame("", -90);
-    frame.ssid[0] = '\0';  // ensure no SSID match
-    frame.mac[0] = 0x58; frame.mac[1] = 0x8E; frame.mac[2] = 0x81;
-    frame.mac[3] = 0xBB; frame.mac[4] = 0xBB; frame.mac[5] = 0xBB;
+    analyzer.analyzeWiFiFrame(makeWiFiFrame("Flock-a1b2c3", -60));
+    REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_CONFIRMED);
+    CHECK(lastThreat.shouldAlert == true);
+    CHECK((lastThreat.matchFlags & DET_SSID_FORMAT) != 0);
+}
+
+TEST_CASE("ThreatAnalyzer: SSID format without OUI is still CONFIRMED") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    // MAC doesn't match any known OUI
+    auto frame = makeWiFiFrame("Flock-a1b2c3", -60);
+    frame.mac[0] = 0xAA; frame.mac[1] = 0xBB; frame.mac[2] = 0xCC;
+    frame.mac[3] = 0x01; frame.mac[4] = 0x02; frame.mac[5] = 0x03;
     analyzer.analyzeWiFiFrame(frame);
     REQUIRE(threatCount == 1);
-    CHECK(lastThreat.certainty == 10);
+    CHECK(lastThreat.alertLevel == ALERT_CONFIRMED);
+}
+
+TEST_CASE("ThreatAnalyzer: SSID keyword + Lite-On OUI is CONFIRMED") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    auto frame = makeWiFiFrame("test_flck", -60);
+    frame.mac[0] = 0x58; frame.mac[1] = 0x8E; frame.mac[2] = 0x81;
+    frame.mac[3] = 0xD1; frame.mac[4] = 0xD2; frame.mac[5] = 0xD3;
+    analyzer.analyzeWiFiFrame(frame);
+    REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_CONFIRMED);
+    CHECK(lastThreat.shouldAlert == true);
+}
+
+TEST_CASE("ThreatAnalyzer: SSID keyword alone is SUSPICIOUS") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    // "flock" keyword but no known OUI
+    auto frame = makeWiFiFrame("Flockdale WiFi", -60);
+    frame.mac[0] = 0xAA; frame.mac[1] = 0xBB; frame.mac[2] = 0xCC;
+    frame.mac[3] = 0xE1; frame.mac[4] = 0xE2; frame.mac[5] = 0xE3;
+    analyzer.analyzeWiFiFrame(frame);
+    REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_SUSPICIOUS);
+    CHECK(lastThreat.shouldAlert == false);
+}
+
+TEST_CASE("ThreatAnalyzer: Lite-On OUI + hidden SSID is SUSPICIOUS") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    auto frame = makeWiFiFrame("", -60);
+    frame.ssid[0] = '\0';
+    frame.mac[0] = 0x58; frame.mac[1] = 0x8E; frame.mac[2] = 0x81;
+    frame.mac[3] = 0xC0; frame.mac[4] = 0xC0; frame.mac[5] = 0xC0;
+    analyzer.analyzeWiFiFrame(frame);
+    REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_SUSPICIOUS);
+    CHECK(lastThreat.shouldAlert == false);
+}
+
+TEST_CASE("ThreatAnalyzer: Lite-On OUI + visible non-matching SSID is NONE") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    auto frame = makeWiFiFrame("SomeNetwork", -60);
+    frame.mac[0] = 0x58; frame.mac[1] = 0x8E; frame.mac[2] = 0x81;
+    frame.mac[3] = 0xC4; frame.mac[4] = 0xC4; frame.mac[5] = 0xC4;
+    analyzer.analyzeWiFiFrame(frame);
+    REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_NONE);
+    CHECK(lastThreat.shouldAlert == false);
+}
+
+TEST_CASE("ThreatAnalyzer: B4:1E:52 Flock Safety OUI is CONFIRMED") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    auto frame = makeWiFiFrame("SomeSSID", -60);
+    frame.mac[0] = 0xB4; frame.mac[1] = 0x1E; frame.mac[2] = 0x52;
+    frame.mac[3] = 0xAA; frame.mac[4] = 0xBB; frame.mac[5] = 0xCC;
+    analyzer.analyzeWiFiFrame(frame);
+    REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_CONFIRMED);
+    CHECK((lastThreat.matchFlags & DET_FLOCK_OUI) != 0);
+    CHECK(lastThreat.shouldAlert == true);
 }
 
 // ============================================================
-// shouldAlert logic
+// shouldAlert / firstDetection logic
 // ============================================================
 
-TEST_CASE("ThreatAnalyzer: shouldAlert true on first high-certainty detection") {
+TEST_CASE("ThreatAnalyzer: shouldAlert true on first CONFIRMED detection") {
     ThreatAnalyzer analyzer;
     analyzer.initialize();
     resetCapture();
@@ -163,7 +229,8 @@ TEST_CASE("ThreatAnalyzer: shouldAlert true on first high-certainty detection") 
     analyzer.analyzeWiFiFrame(makeWiFiFrame("Flock-a1b2c3", -60));
     REQUIRE(threatCount == 1);
     CHECK(lastThreat.shouldAlert == true);
-    CHECK(lastThreat.certainty >= ALERT_THRESHOLD);
+    CHECK(lastThreat.firstDetection == true);
+    CHECK(lastThreat.alertLevel == ALERT_CONFIRMED);
 }
 
 TEST_CASE("ThreatAnalyzer: shouldAlert false on repeat detection") {
@@ -181,29 +248,32 @@ TEST_CASE("ThreatAnalyzer: shouldAlert false on repeat detection") {
     mock_millis_value = 6000;
     analyzer.analyzeWiFiFrame(frame);
     CHECK(lastThreat.shouldAlert == false);
+    CHECK(lastThreat.firstDetection == false);
 }
 
-TEST_CASE("ThreatAnalyzer: shouldAlert false when below threshold") {
+TEST_CASE("ThreatAnalyzer: shouldAlert false for SUSPICIOUS level") {
     ThreatAnalyzer analyzer;
     analyzer.initialize();
     resetCapture();
     mock_millis_value = 5000;
 
-    // OUI-only match at weak signal: certainty = 20 + (-10) = 10
-    auto frame = makeWiFiFrame("", -90);
+    // Hidden SSID + OUI = SUSPICIOUS, not CONFIRMED
+    auto frame = makeWiFiFrame("", -60);
     frame.ssid[0] = '\0';
     frame.mac[0] = 0xCC; frame.mac[1] = 0xCC; frame.mac[2] = 0xCC;
     frame.mac[3] = 0xAA; frame.mac[4] = 0xAA; frame.mac[5] = 0xAA;
     analyzer.analyzeWiFiFrame(frame);
     REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_SUSPICIOUS);
     CHECK(lastThreat.shouldAlert == false);
+    CHECK(lastThreat.firstDetection == true);
 }
 
 // ============================================================
-// BLE scoring
+// BLE alert levels
 // ============================================================
 
-TEST_CASE("ThreatAnalyzer: BLE Raven UUID produces acoustic_detector category") {
+TEST_CASE("ThreatAnalyzer: BLE Raven custom UUID is CONFIRMED") {
     ThreatAnalyzer analyzer;
     analyzer.initialize();
     resetCapture();
@@ -213,12 +283,13 @@ TEST_CASE("ThreatAnalyzer: BLE Raven UUID produces acoustic_detector category") 
     device.mac[5] = 0x30;
     analyzer.analyzeBluetoothDevice(device);
     REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_CONFIRMED);
     CHECK(strcmp(lastThreat.category, "acoustic_detector") == 0);
     CHECK(strcmp(lastThreat.radioType, "bluetooth") == 0);
     CHECK(lastThreat.channel == 0);
 }
 
-TEST_CASE("ThreatAnalyzer: BLE name-only produces surveillance_device category") {
+TEST_CASE("ThreatAnalyzer: BLE name match is CONFIRMED") {
     ThreatAnalyzer analyzer;
     analyzer.initialize();
     resetCapture();
@@ -228,7 +299,52 @@ TEST_CASE("ThreatAnalyzer: BLE name-only produces surveillance_device category")
     device.mac[5] = 0x40;
     analyzer.analyzeBluetoothDevice(device);
     REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_CONFIRMED);
     CHECK(strcmp(lastThreat.category, "surveillance_device") == 0);
+}
+
+TEST_CASE("ThreatAnalyzer: BLE Flock Safety OUI is CONFIRMED") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    auto device = makeBLEDevice("", -60);
+    device.mac[0] = 0xB4; device.mac[1] = 0x1E; device.mac[2] = 0x52;
+    device.mac[3] = 0xDD; device.mac[4] = 0xEE; device.mac[5] = 0xFF;
+    analyzer.analyzeBluetoothDevice(device);
+    REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_CONFIRMED);
+    CHECK((lastThreat.matchFlags & DET_FLOCK_OUI) != 0);
+}
+
+TEST_CASE("ThreatAnalyzer: BLE Lite-On OUI only is SUSPICIOUS") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    auto device = makeBLEDevice("", -60);
+    device.mac[0] = 0x58; device.mac[1] = 0x8E; device.mac[2] = 0x81;
+    device.mac[3] = 0xA1; device.mac[4] = 0xA2; device.mac[5] = 0xA3;
+    analyzer.analyzeBluetoothDevice(device);
+    REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_SUSPICIOUS);
+    CHECK(lastThreat.shouldAlert == false);
+}
+
+TEST_CASE("ThreatAnalyzer: BLE Raven std UUID only is SUSPICIOUS") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    auto device = makeBLEDevice("", -60, "0000180a-0000-1000-8000-00805f9b34fb");
+    device.mac[0] = 0xAA; device.mac[1] = 0xBB; device.mac[2] = 0xCC;
+    device.mac[3] = 0xB1; device.mac[4] = 0xB2; device.mac[5] = 0xB3;
+    analyzer.analyzeBluetoothDevice(device);
+    REQUIRE(threatCount == 1);
+    CHECK(lastThreat.alertLevel == ALERT_SUSPICIOUS);
 }
 
 TEST_CASE("ThreatAnalyzer: BLE no-match produces no threat") {
@@ -254,13 +370,13 @@ TEST_CASE("ThreatAnalyzer: tick returns false when no devices tracked") {
     CHECK_FALSE(analyzer.tick(HEARTBEAT_INTERVAL_MS));
 }
 
-TEST_CASE("ThreatAnalyzer: tick returns true when high-confidence device in range") {
+TEST_CASE("ThreatAnalyzer: tick returns true when confirmed device in range") {
     ThreatAnalyzer analyzer;
     analyzer.initialize();
     resetCapture();
     mock_millis_value = 1000;
 
-    // Inject a high-certainty device
+    // Inject a CONFIRMED device
     auto frame = makeWiFiFrame("Flock-a1b2c3", -60);
     frame.mac[5] = 0x60;
     analyzer.analyzeWiFiFrame(frame);
@@ -287,4 +403,21 @@ TEST_CASE("ThreatAnalyzer: tick returns false before heartbeat interval") {
 
     // Tick before interval elapses
     CHECK_FALSE(analyzer.tick(HEARTBEAT_INTERVAL_MS - 1));
+}
+
+// ============================================================
+// test_flck keyword
+// ============================================================
+
+TEST_CASE("ThreatAnalyzer: test_flck keyword triggers detection") {
+    ThreatAnalyzer analyzer;
+    analyzer.initialize();
+    resetCapture();
+    mock_millis_value = 5000;
+
+    auto frame = makeWiFiFrame("test_flck", -60);
+    frame.mac[3] = 0xF1; frame.mac[4] = 0xF2; frame.mac[5] = 0xF3;
+    analyzer.analyzeWiFiFrame(frame);
+    REQUIRE(threatCount == 1);
+    CHECK((lastThreat.matchFlags & DET_SSID_KEYWORD) != 0);
 }

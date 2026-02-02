@@ -486,6 +486,8 @@ void loop() {
             buzzerBeep(2800, 120);
             delay(80);
             buzzerBeep(2800, 120);
+        } else if (threatCopy.alertLevel == ALERT_SUSPICIOUS && threatCopy.firstDetection) {
+            buzzerBeep(1800, 60);
         }
     }
 

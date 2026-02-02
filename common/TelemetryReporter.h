@@ -34,6 +34,7 @@ public:
         target["mac"] = macStr;
         target["label"] = threat.identifier;
         target["certainty"] = threat.certainty;
+        target["alert_level"] = threat.alertLevel;
         target["category"] = threat.category;
         target["should_alert"] = threat.shouldAlert;
 
@@ -43,10 +44,10 @@ public:
         static const char* const detectorNames[] = {
             "ssid_format", "ssid_keyword", "mac_oui",
             "ble_name", "raven_custom_uuid", "raven_std_uuid",
-            "rssi_modifier"
+            "rssi_modifier", "flock_oui", "surveillance_oui"
         };
 
-        for (uint8_t bit = 0; bit < 7; bit++) {
+        for (uint8_t bit = 0; bit < 9; bit++) {
             if (threat.matchFlags & (1 << bit)) {
                 if (bit == 6) {
                     // rssi_modifier is signed

@@ -22,6 +22,8 @@ enum DetectorFlag : uint16_t {
     DET_RAVEN_CUSTOM_UUID = (1 << 4),
     DET_RAVEN_STD_UUID    = (1 << 5),
     DET_RSSI_MODIFIER     = (1 << 6),
+    DET_FLOCK_OUI         = (1 << 7),
+    DET_SURVEILLANCE_OUI  = (1 << 8),
 };
 
 // Forward declarations (defined in EventBus.h)
@@ -43,6 +45,14 @@ struct BLEDetectorEntry {
     DetectorFlag  flag;
 };
 
+// Alert severity tiers — derived from detector flags, not numeric scores.
+enum AlertLevel : uint8_t {
+    ALERT_NONE       = 0,  // no match (event still published for telemetry)
+    ALERT_INFO       = 1,  // other surveillance camera OUI — display only
+    ALERT_SUSPICIOUS = 2,  // weak signal, needs context
+    ALERT_CONFIRMED  = 3,  // high confidence — full alert
+};
+
 // Device presence tracking
 enum class DeviceState : uint8_t {
     EMPTY,
@@ -55,7 +65,7 @@ struct TrackedDevice {
     uint8_t     mac[6];
     uint32_t    firstSeenMs;
     uint32_t    lastSeenMs;
-    uint8_t     maxCertainty;
+    AlertLevel  maxAlertLevel;
     DeviceState state;
     // 6 + 4 + 4 + 1 + 1 = 16 bytes per slot
 };
@@ -64,6 +74,5 @@ struct TrackedDevice {
 static const uint8_t  MAX_TRACKED_DEVICES   = 32;
 static const uint32_t DEVICE_TIMEOUT_MS     = 60000;
 static const uint32_t HEARTBEAT_INTERVAL_MS = 10000;
-static const uint8_t  ALERT_THRESHOLD       = 65;
 
 #endif

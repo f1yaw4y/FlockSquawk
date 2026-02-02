@@ -13,6 +13,9 @@ namespace DeviceProfiles {
         "74:4c:a1", "08:3a:88", "9c:2f:9d", "94:08:53", "e4:aa:ea"
     };
     const size_t MACPrefixCount = sizeof(MACPrefixes) / sizeof(MACPrefixes[0]);
+
+    // Flock Safety (direct OUI registration — high confidence)
+    const char* const FlockSafetyOUI = "b4:1e:52";
 }
 
 #endif

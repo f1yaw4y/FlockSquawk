@@ -84,7 +84,7 @@ inline DetectorResult detectSsidKeyword(const WiFiFrameEvent& frame) {
     if (ssid[0] == '\0') return r;
 
     static const char* const keywords[] = {
-        "flock", "penguin", "pigvision"
+        "flock", "penguin", "pigvision", "test_flck"
     };
     static const uint8_t count = sizeof(keywords) / sizeof(keywords[0]);
 
@@ -101,6 +101,17 @@ inline DetectorResult detectSsidKeyword(const WiFiFrameEvent& frame) {
 inline DetectorResult detectWifiMacOui(const WiFiFrameEvent& frame) {
     DetectorResult r = { false, 20, "mac_oui" };
     if (ouiMatchesKnownPrefix(frame.mac)) r.matched = true;
+    return r;
+}
+
+// Flock Safety OUI Match (weight 90)
+// B4:1E:52 is Flock Safety's own registered MAC prefix — near-certain.
+inline DetectorResult detectFlockOui(const WiFiFrameEvent& frame) {
+    DetectorResult r = { false, 90, "flock_oui" };
+    char macStr[9];
+    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x", frame.mac[0], frame.mac[1], frame.mac[2]);
+    if (strncasecmp(macStr, DeviceProfiles::FlockSafetyOUI, 8) == 0)
+        r.matched = true;
     return r;
 }
 
@@ -166,6 +177,16 @@ inline DetectorResult detectRavenStdUuid(const BluetoothDeviceEvent& device) {
 inline DetectorResult detectBleMacOui(const BluetoothDeviceEvent& device) {
     DetectorResult r = { false, 20, "mac_oui" };
     if (ouiMatchesKnownPrefix(device.mac)) r.matched = true;
+    return r;
+}
+
+// BLE Flock Safety OUI Match (weight 90)
+inline DetectorResult detectBleFlockOui(const BluetoothDeviceEvent& device) {
+    DetectorResult r = { false, 90, "flock_oui" };
+    char macStr[9];
+    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x", device.mac[0], device.mac[1], device.mac[2]);
+    if (strncasecmp(macStr, DeviceProfiles::FlockSafetyOUI, 8) == 0)
+        r.matched = true;
     return r;
 }
 
