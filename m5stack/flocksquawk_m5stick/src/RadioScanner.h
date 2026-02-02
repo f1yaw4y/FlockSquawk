@@ -20,6 +20,7 @@ public:
     void initialize();
     void update();  // Call from main loop
     static uint8_t getCurrentWifiChannel();
+    static bool isBleScanning() { return isScanningBLE; }
 
     // Switch between battery-optimized and high-performance scanning
     static void setPerformanceMode(bool highPerformance) {

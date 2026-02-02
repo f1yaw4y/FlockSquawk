@@ -19,6 +19,7 @@
 #include "ThreatAnalyzer.h"
 #include "BleTransport.h"
 #include "BatterySmoothing.h"
+#include "ConnectionStatus.h"
 #include "TelemetryReporter.h"
 
 // TelemetryReporter::_sendViaBle requires BleTransport to be fully defined.
@@ -103,7 +104,7 @@ namespace {
     uint32_t alertLastFlashMs = 0;
     uint32_t alertUntilMs = 0;
     uint32_t detectionCount = 0;
-    bool powerSaverEnabled = true;
+    bool powerSaverEnabled = false;
     portMUX_TYPE threatMux = portMUX_INITIALIZER_UNLOCKED;
     volatile bool threatPending = false;
     ThreatEvent pendingThreat;
@@ -128,6 +129,7 @@ namespace {
 
     enum class DisplayState {
         Awake,
+        Debug,
         PowerSaveMessage,
         Off
     };
@@ -291,7 +293,8 @@ namespace {
         }
     }
 
-    void drawDeviceListHeader(uint8_t dots, uint8_t battery, uint8_t activeCount) {
+    void drawDeviceListHeader(uint8_t dots, uint8_t battery,
+                              bool bleConnected, uint8_t serialState, bool batteryRising) {
         if (!spriteCreated) return;
 
         headerSprite->fillSprite(TFT_BLACK);
@@ -306,13 +309,49 @@ namespace {
         headerSprite->setTextColor(STATUS_TEXT_COLOR, TFT_BLACK);
         headerSprite->print(scanText);
 
-        // Right: "B:85% D:3"
-        char rightText[16];
-        snprintf(rightText, sizeof(rightText), "B:%u%% D:%u", battery, activeCount);
-        int16_t textWidth = headerSprite->textWidth(rightText);
-        headerSprite->setCursor(240 - textWidth, 0);
+        // Right side, drawn right-to-left:
+        //   "X  +80%"
+        int16_t x = 240;
+
+        // Battery percentage (color-coded) — reserve fixed width for "100%"
+        // so elements to the left don't shift as digit count changes.
+        char battText[6];
+        snprintf(battText, sizeof(battText), "%u%%", battery);
+        int16_t battMaxW = headerSprite->textWidth("100%");
+        int16_t battActualW = headerSprite->textWidth(battText);
+        x -= battMaxW;
+        headerSprite->setCursor(x + (battMaxW - battActualW), 0);
         headerSprite->setTextColor(batteryColor(battery), TFT_BLACK);
-        headerSprite->print(rightText);
+        headerSprite->print(battText);
+
+        // Charging indicator "+" — always reserve space, only draw when rising
+        x -= headerSprite->textWidth("+");
+        if (batteryRising) {
+            headerSprite->setCursor(x, 0);
+            headerSprite->setTextColor(TFT_GREEN, TFT_BLACK);
+            headerSprite->print("+");
+        }
+
+        // Gap
+        x -= 8;
+
+        // Data connection: B (BLE), S (serial), or X (none)
+        char connChar;
+        uint16_t connColor;
+        if (bleConnected) {
+            connChar = 'B';
+            connColor = TFT_BLUE;
+        } else if (serialState == CONN_SERIAL) {
+            connChar = 'S';
+            connColor = TFT_CYAN;
+        } else {
+            connChar = 'X';
+            connColor = TFT_RED;
+        }
+        x -= headerSprite->textWidth("B");
+        headerSprite->setCursor(x, 0);
+        headerSprite->setTextColor(connColor, TFT_BLACK);
+        headerSprite->print(connChar);
 
         // Separator line at bottom of header sprite
         headerSprite->drawFastHLine(0, LIST_SEPARATOR_Y, 240, TFT_DARKGREY);
@@ -391,7 +430,8 @@ namespace {
         listSprite->pushSprite(0, LIST_TOP_Y);
     }
 
-    void initScanningUi(uint32_t nowMs) {
+    void initScanningUi(uint32_t nowMs, bool bleConn = false,
+                        uint8_t serSt = 0, bool batRising = false) {
         setDisplayOn();
         M5.Display.clear(TFT_BLACK);
         M5.Display.setTextColor(STATUS_TEXT_COLOR, TFT_BLACK);
@@ -407,7 +447,7 @@ namespace {
             spriteCreated = true;
         }
 
-        drawDeviceListHeader(1, batteryFilter.smoothed, countActiveDevices());
+        drawDeviceListHeader(1, batteryFilter.smoothed, bleConn, serSt, batRising);
         drawDeviceList(nowMs);
         displayState = DisplayState::Awake;
         displayStateMs = nowMs;
@@ -491,6 +531,32 @@ namespace {
         }
         detectionCount++;
         alertUntilMs = nowMs + ALERT_DURATION_MS;
+    }
+
+    const uint32_t DEBUG_REFRESH_MS = 400;
+
+    // Draws debug info directly to display, overwriting in place.
+    // Call fillScreen(BLACK) once before the first call.
+    void drawDebugScreen() {
+        M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+        M5.Display.setTextSize(2);
+        M5.Display.setCursor(0, 0);
+
+        // Scan status
+        M5.Display.printf("WiFi CH: %-4u\n", RadioScannerManager::getCurrentWifiChannel());
+        M5.Display.printf("BLE:     %-4s\n", RadioScannerManager::isBleScanning() ? "scan" : "idle");
+
+        // System health
+        M5.Display.printf("Heap:    %-4ukB\n", (unsigned)(ESP.getFreeHeap() / 1024));
+        M5.Display.printf("Up:      %-6us\n", (unsigned)(millis() / 1000));
+
+        // Battery — raw vs smoothed
+        M5.Display.printf("Batt:    %u/%-4u%%\n", batteryFilter.lastRaw, batteryFilter.smoothed);
+
+        // Detection stats
+        uint8_t active = countActiveDevices();
+        M5.Display.printf("Devs:    %u/%-4u\n", active, displayDeviceCount);
+        M5.Display.printf("Alerts:  %-6u\n", (unsigned)detectionCount);
     }
 
     void showStatusMessage(const char* line1, const char* line2) {
@@ -769,7 +835,7 @@ void setup() {
     
     Serial.println("System operational - scanning for targets");
     Serial.println();
-
+    
     // Seed battery smoothing buffer
     batteryFilter.seed(M5.Power.getBatteryLevel());
 
@@ -784,27 +850,40 @@ void loop() {
     static uint8_t dots = 1;
     static uint32_t lastDotMs = 0;
     static uint32_t lastListRefreshMs = 0;
+    static uint32_t lastDebugRefreshMs = 0;
     static bool wasAlertActive = false;
     static bool powerToggleHandled = false;
     static bool lastShouldPowerSave = false;
-    static bool lastOnExternalPower = false;
-    static uint32_t lastPowerCheckMs = 0;
     uint32_t now = millis();
 
     // Update smoothed battery reading (gated by BATTERY_UPDATE_MS internally)
     updateBattery(now);
 
-    // Check external power periodically and adjust scan/display modes
-    if (now - lastPowerCheckMs >= BATTERY_UPDATE_MS) {
-        bool onExternalPower = M5.Power.isCharging();
-        if (onExternalPower != lastOnExternalPower) {
-            RadioScannerManager::setPerformanceMode(onExternalPower);
-            lastOnExternalPower = onExternalPower;
-        }
-        lastPowerCheckMs = now;
+    // Drain incoming serial data (heartbeat pings from app)
+    static uint32_t lastSerialRxMs = 0;
+    while (Serial.available()) {
+        Serial.read();
+        lastSerialRxMs = now;
     }
 
-    bool shouldPowerSave = lastOnExternalPower ? false : powerSaverEnabled;
+    // Battery trend tracking for indirect charge detection (uses raw for fast response)
+    static uint8_t prevBatteryRaw = 0;
+    static bool batteryRising = false;
+    static uint32_t lastBatteryTrendMs = 0;
+    if (now - lastBatteryTrendMs >= BATTERY_UPDATE_MS) {
+        // Skip trend comparison on first iteration (prev is unseeded)
+        if (lastBatteryTrendMs > 0) {
+            batteryRising = isBatteryRising(batteryFilter.lastRaw, prevBatteryRaw);
+        }
+        prevBatteryRaw = batteryFilter.lastRaw;
+        lastBatteryTrendMs = now;
+    }
+
+    // Connection indicators for header
+    uint8_t serialState = computeSerialState(lastSerialRxMs, now);
+    bool bleConn = bleTransport.isClientConnected();
+
+    bool shouldPowerSave = powerSaverEnabled;
 
     if (wifiFramePending) {
         WiFiFrameEvent frameCopy;
@@ -839,14 +918,14 @@ void loop() {
         } else if (threatCopy.alertLevel == ALERT_SUSPICIOUS && threatCopy.firstDetection) {
             M5.Speaker.tone(1800, 60);
         }
-        // Immediate list refresh on new detection (if display is awake and not alerting)
+        // Immediate list refresh on new detection (main screen only)
         if (!alertActive && !statusMessageActive && displayState == DisplayState::Awake) {
-            drawDeviceListHeader(dots, batteryFilter.smoothed, countActiveDevices());
+            drawDeviceListHeader(dots, batteryFilter.smoothed, bleConn, serialState, batteryRising);
             drawDeviceList(now);
         }
     }
 
-    // Scroll buttons — before the long-press handler
+    // Scroll buttons — main screen only
     if (M5.BtnPWR.wasClicked() && !alertActive && !statusMessageActive && displayState == DisplayState::Awake) {
         if (scrollOffset > 0) {
             scrollOffset--;
@@ -874,10 +953,23 @@ void loop() {
         powerToggleHandled = false;
     }
 
-    if (M5.BtnA.wasPressed() && shouldPowerSave) {
-        initScanningUi(now);
-        lastDotMs = now;
-        lastListRefreshMs = now;
+    // BtnA: toggle between main screen and debug screen
+    if (M5.BtnA.wasPressed()) {
+        if (shouldPowerSave && displayState == DisplayState::Off) {
+            initScanningUi(now, bleConn, serialState, batteryRising);
+            lastDotMs = now;
+            lastListRefreshMs = now;
+        } else if (displayState == DisplayState::Debug) {
+            initScanningUi(now, bleConn, serialState, batteryRising);
+            lastDotMs = now;
+            lastListRefreshMs = now;
+        } else if (displayState == DisplayState::Awake) {
+            setDisplayOn();
+            M5.Display.fillScreen(TFT_BLACK);
+            drawDebugScreen();
+            displayState = DisplayState::Debug;
+            lastDebugRefreshMs = now;
+        }
     }
 
     bool isAlerting = updateAlert(now);
@@ -890,7 +982,7 @@ void loop() {
             setDisplayOff();
             displayState = DisplayState::Off;
         } else {
-            initScanningUi(now);
+            initScanningUi(now, bleConn, serialState, batteryRising);
             lastDotMs = now;
             lastListRefreshMs = now;
         }
@@ -899,12 +991,12 @@ void loop() {
 
     if (statusMessageActive && now >= statusMessageUntilMs) {
         statusMessageActive = false;
-        initScanningUi(now);
+        initScanningUi(now, bleConn, serialState, batteryRising);
     }
 
     if (!isAlerting && !statusMessageActive && shouldPowerSave != lastShouldPowerSave) {
         lastShouldPowerSave = shouldPowerSave;
-        initScanningUi(now);
+        initScanningUi(now, bleConn, serialState, batteryRising);
     }
 
     if (!isAlerting && !statusMessageActive) {
@@ -915,23 +1007,30 @@ void loop() {
                 setDisplayOff();
                 displayState = DisplayState::Off;
             }
-        } else if (displayState != DisplayState::Awake) {
-            initScanningUi(now);
+        } else if (displayState == DisplayState::Off) {
+            initScanningUi(now, bleConn, serialState, batteryRising);
         }
     }
 
-    // Header updates (dots animation + battery/count)
-    if (!isAlerting && !statusMessageActive && displayState == DisplayState::Awake && now - lastDotMs >= DOT_UPDATE_MS) {
+    // Debug screen refresh — skip during status messages and alerts
+    if (displayState == DisplayState::Debug && !statusMessageActive && !isAlerting
+        && now - lastDebugRefreshMs >= DEBUG_REFRESH_MS) {
+        drawDebugScreen();
+        lastDebugRefreshMs = now;
+    }
+
+    // Header updates (dots animation + battery/count) — main screen only
+    if (displayState == DisplayState::Awake && !isAlerting && !statusMessageActive && now - lastDotMs >= DOT_UPDATE_MS) {
         dots = (dots % MAX_DOTS) + 1;
-        drawDeviceListHeader(dots, batteryFilter.smoothed, countActiveDevices());
+        drawDeviceListHeader(dots, batteryFilter.smoothed, bleConn, serialState, batteryRising);
         lastDotMs = now;
     }
 
-    // Periodic device list refresh — age devices and redraw
+    // Periodic device list refresh — main screen only
     if (!isAlerting && !statusMessageActive && now - lastListRefreshMs >= LIST_REFRESH_MS) {
         ageDisplayDevices(now);
         if (displayState == DisplayState::Awake) {
-            drawDeviceListHeader(dots, batteryFilter.smoothed, countActiveDevices());
+            drawDeviceListHeader(dots, batteryFilter.smoothed, bleConn, serialState, batteryRising);
             drawDeviceList(now);
         }
         lastListRefreshMs = now;

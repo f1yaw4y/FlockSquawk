@@ -11,6 +11,7 @@ struct BatteryFilter {
     uint8_t idx = 0;
     bool full = false;
     uint8_t smoothed = 0;
+    uint8_t lastRaw = 0;
 
     // Fill the entire buffer with a single value so the filter
     // produces a stable result immediately after boot.
@@ -18,10 +19,12 @@ struct BatteryFilter {
         for (uint8_t i = 0; i < HISTORY_SIZE; i++) history[i] = value;
         full = true;
         smoothed = value;
+        lastRaw = value;
     }
 
     // Push a new raw reading and recompute the median.
     void addSample(uint8_t raw) {
+        lastRaw = raw;
         history[idx] = raw;
         idx = (idx + 1) % HISTORY_SIZE;
         if (!full && idx == 0) full = true;
