@@ -115,6 +115,7 @@ private:
                 oldestTime = slots[i].lastSeenMs;
             }
         }
+        slots[oldest].state = DeviceState::EMPTY;
         return oldest;
     }
 };

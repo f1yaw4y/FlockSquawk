@@ -13,7 +13,7 @@ public:
     }
 
     void handleThreatDetection(const ThreatEvent& threat) {
-        StaticJsonDocument<512> doc;
+        StaticJsonDocument<768> doc;
 
         doc["event"] = "target_detected";
         doc["ms_since_boot"] = millis() - bootTime;
@@ -46,7 +46,10 @@ public:
             "rssi_modifier"
         };
 
-        for (uint8_t bit = 0; bit < 7; bit++) {
+        static const uint8_t DETECTOR_NAME_COUNT =
+            sizeof(detectorNames) / sizeof(detectorNames[0]);
+
+        for (uint8_t bit = 0; bit < DETECTOR_NAME_COUNT; bit++) {
             if (threat.matchFlags & (1 << bit)) {
                 if (bit == 6) {
                     // rssi_modifier is signed
