@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <functional>
+#include "DetectorTypes.h"
 
 enum class EventType {
     WifiFrameCaptured,
@@ -33,9 +34,15 @@ struct ThreatEvent {
     char identifier[64];
     int8_t rssi;
     uint8_t channel;
-    const char* radioType;
+    char radioType[16];
     uint8_t certainty;
-    const char* category;
+    char category[24];
+    uint16_t matchFlags;
+    uint8_t  detectorWeights[MAX_DETECTOR_WEIGHTS];
+    int8_t   rssiModifier;
+    AlertLevel alertLevel;
+    bool     firstDetection;  // true when device was not previously tracked
+    bool     shouldAlert;
 };
 
 struct AudioEvent {

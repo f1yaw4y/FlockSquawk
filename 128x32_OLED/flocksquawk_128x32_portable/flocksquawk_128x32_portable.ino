@@ -10,14 +10,16 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/portmacro.h"
 #include "esp_wifi.h"
 #include "esp_wifi_types.h"
 
-#include "src/EventBus.h"
-#include "src/DeviceSignatures.h"
+#include "EventBus.h"
+#include "DeviceSignatures.h"
 #include "src/RadioScanner.h"
-#include "src/ThreatAnalyzer.h"
-#include "src/TelemetryReporter.h"
+#include "ThreatAnalyzer.h"
+#include "TelemetryReporter.h"
 
 // 0.91" 128x32 SSD1306 OLED (I2C)
 static constexpr int kScreenWidth = 128;
@@ -163,6 +165,7 @@ EventBus::WiFiFrameHandler EventBus::wifiHandler = nullptr;
 EventBus::BluetoothHandler EventBus::bluetoothHandler = nullptr;
 EventBus::ThreatHandler EventBus::threatHandler = nullptr;
 EventBus::SystemEventHandler EventBus::systemReadyHandler = nullptr;
+EventBus::AudioHandler EventBus::audioHandler = nullptr;
 
 void EventBus::publishWifiFrame(const WiFiFrameEvent& event) {
     if (wifiHandler) wifiHandler(event);
@@ -180,6 +183,10 @@ void EventBus::publishSystemReady() {
     if (systemReadyHandler) systemReadyHandler();
 }
 
+void EventBus::publishAudioRequest(const AudioEvent& event) {
+    if (audioHandler) audioHandler(event);
+}
+
 void EventBus::subscribeWifiFrame(WiFiFrameHandler handler) {
     wifiHandler = handler;
 }
@@ -195,6 +202,21 @@ void EventBus::subscribeThreat(ThreatHandler handler) {
 void EventBus::subscribeSystemReady(SystemEventHandler handler) {
     systemReadyHandler = handler;
 }
+
+void EventBus::subscribeAudioRequest(AudioHandler handler) {
+    audioHandler = handler;
+}
+
+// Thread-safe deferred event processing
+static portMUX_TYPE wifiMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool wifiFramePending = false;
+static WiFiFrameEvent pendingWiFiFrame;
+static portMUX_TYPE bleMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool bleDevicePending = false;
+static BluetoothDeviceEvent pendingBleDevice;
+static portMUX_TYPE threatMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool threatPending = false;
+static ThreatEvent pendingThreat;
 
 // RadioScannerManager implementation
 void RadioScannerManager::initialize() {
@@ -310,21 +332,22 @@ void RadioScannerManager::wifiPacketHandler(void* buffer, wifi_promiscuous_pkt_t
     uint8_t frameSubtype = (header->frameControl & 0x00F0) >> 4;
     
     bool isProbeRequest = (frameSubtype == 0x04);
+    bool isProbeResponse = (frameSubtype == 0x05);
     bool isBeacon = (frameSubtype == 0x08);
-    
-    if (!isProbeRequest && !isBeacon) return;
-    
+
+    if (!isProbeRequest && !isProbeResponse && !isBeacon) return;
+
     WiFiFrameEvent event;
     memset(&event, 0, sizeof(event));
-    
+
     memcpy(event.mac, header->source, 6);
     event.rssi = packet->rx_ctrl.rssi;
     event.frameSubtype = frameSubtype;
     event.channel = RadioScannerManager::currentWifiChannel;
-    
+
     const uint8_t* payload = rawData + sizeof(WiFi80211Header);
-    
-    if (isBeacon) {
+
+    if (isBeacon || isProbeResponse) {
         payload += 12;
     }
     
@@ -344,188 +367,10 @@ unsigned long RadioScannerManager::lastChannelSwitch = 0;
 unsigned long RadioScannerManager::lastBLEScan = 0;
 NimBLEScan* RadioScannerManager::bleScanner = nullptr;
 bool RadioScannerManager::isScanningBLE = false;
+uint16_t RadioScannerManager::CHANNEL_SWITCH_MS = 300;
+uint8_t RadioScannerManager::BLE_SCAN_SECONDS = 2;
+uint32_t RadioScannerManager::BLE_SCAN_INTERVAL_MS = 5000;
 
-// ThreatAnalyzer implementation
-void ThreatAnalyzer::initialize() {
-    // Analyzer ready
-}
-
-void ThreatAnalyzer::analyzeWiFiFrame(const WiFiFrameEvent& frame) {
-    bool nameMatch = strlen(frame.ssid) > 0 && matchesNetworkName(frame.ssid);
-    bool macMatch = matchesMACPrefix(frame.mac);
-    
-    if (nameMatch || macMatch) {
-        uint8_t certainty = calculateCertainty(nameMatch, macMatch, false);
-        emitThreatDetection(frame, "wifi", certainty);
-    }
-}
-
-void ThreatAnalyzer::analyzeBluetoothDevice(const BluetoothDeviceEvent& device) {
-    bool nameMatch = strlen(device.name) > 0 && matchesBLEName(device.name);
-    bool macMatch = matchesMACPrefix(device.mac);
-    bool uuidMatch = device.hasServiceUUID && matchesRavenService(device.serviceUUID);
-    
-    if (nameMatch || macMatch || uuidMatch) {
-        uint8_t certainty = calculateCertainty(nameMatch, macMatch, uuidMatch);
-        const char* category = determineCategory(uuidMatch);
-        emitThreatDetection(device, "bluetooth", certainty, category);
-    }
-}
-
-bool ThreatAnalyzer::matchesNetworkName(const char* ssid) {
-    if (!ssid) return false;
-    
-    for (size_t i = 0; i < DeviceProfiles::NetworkNameCount; i++) {
-        if (strcasestr(ssid, DeviceProfiles::NetworkNames[i])) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ThreatAnalyzer::matchesMACPrefix(const uint8_t* mac) {
-    char macStr[9];
-    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x", mac[0], mac[1], mac[2]);
-    
-    for (size_t i = 0; i < DeviceProfiles::MACPrefixCount; i++) {
-        if (strncasecmp(macStr, DeviceProfiles::MACPrefixes[i], 8) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ThreatAnalyzer::matchesBLEName(const char* name) {
-    if (!name) return false;
-    
-    for (size_t i = 0; i < DeviceProfiles::BLEIdentifierCount; i++) {
-        if (strcasestr(name, DeviceProfiles::BLEIdentifiers[i])) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ThreatAnalyzer::matchesRavenService(const char* uuid) {
-    if (!uuid) return false;
-    
-    for (size_t i = 0; i < DeviceProfiles::RavenServiceCount; i++) {
-        if (strcasecmp(uuid, DeviceProfiles::RavenServices[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-uint8_t ThreatAnalyzer::calculateCertainty(bool nameMatch, bool macMatch, bool uuidMatch) {
-    if (nameMatch && macMatch && uuidMatch) return 100;
-    if (nameMatch && macMatch) return 95;
-    if (uuidMatch) return 90;
-    if (nameMatch || macMatch) return 85;
-    return 70;
-}
-
-const char* ThreatAnalyzer::determineCategory(bool isRaven) {
-    return isRaven ? "acoustic_detector" : "surveillance_device";
-}
-
-void ThreatAnalyzer::emitThreatDetection(const WiFiFrameEvent& frame, const char* radio, uint8_t certainty) {
-    ThreatEvent threat;
-    memset(&threat, 0, sizeof(threat));
-    memcpy(threat.mac, frame.mac, 6);
-    strncpy(threat.identifier, frame.ssid, sizeof(threat.identifier) - 1);
-    threat.rssi = frame.rssi;
-    threat.channel = frame.channel;
-    threat.radioType = radio;
-    threat.certainty = certainty;
-    threat.category = "surveillance_device";
-    
-    EventBus::publishThreat(threat);
-}
-
-void ThreatAnalyzer::emitThreatDetection(const BluetoothDeviceEvent& device, const char* radio, uint8_t certainty, const char* category) {
-    ThreatEvent threat;
-    memset(&threat, 0, sizeof(threat));
-    memcpy(threat.mac, device.mac, 6);
-    strncpy(threat.identifier, device.name, sizeof(threat.identifier) - 1);
-    threat.rssi = device.rssi;
-    threat.channel = 0;
-    threat.radioType = radio;
-    threat.certainty = certainty;
-    threat.category = category;
-    
-    EventBus::publishThreat(threat);
-}
-
-// TelemetryReporter implementation
-void TelemetryReporter::initialize() {
-    bootTime = millis();
-}
-
-void TelemetryReporter::handleThreatDetection(const ThreatEvent& threat) {
-    DynamicJsonDocument doc(2048);
-    
-    doc["event"] = "target_detected";
-    doc["ms_since_boot"] = millis() - bootTime;
-    
-    appendSourceInfo(threat, doc);
-    appendTargetIdentity(threat, doc);
-    appendIndicators(threat, doc);
-    appendMetadata(threat, doc);
-    
-    outputJSON(doc);
-}
-
-void TelemetryReporter::appendSourceInfo(const ThreatEvent& threat, JsonDocument& doc) {
-    JsonObject source = doc.createNestedObject("source");
-    source["radio"] = threat.radioType;
-    source["channel"] = threat.channel;
-    source["rssi"] = threat.rssi;
-}
-
-void TelemetryReporter::appendTargetIdentity(const ThreatEvent& threat, JsonDocument& doc) {
-    JsonObject target = doc.createNestedObject("target");
-    JsonObject identity = target.createNestedObject("identity");
-    
-    char macStr[18];
-    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
-             threat.mac[0], threat.mac[1], threat.mac[2],
-             threat.mac[3], threat.mac[4], threat.mac[5]);
-    identity["mac"] = macStr;
-    
-    char oui[9];
-    snprintf(oui, sizeof(oui), "%02x:%02x:%02x", threat.mac[0], threat.mac[1], threat.mac[2]);
-    identity["oui"] = oui;
-    
-    identity["label"] = threat.identifier;
-}
-
-void TelemetryReporter::appendIndicators(const ThreatEvent& threat, JsonDocument& doc) {
-    JsonObject indicators = doc["target"].createNestedObject("indicators");
-    
-    bool hasName = strlen(threat.identifier) > 0;
-    indicators["ssid_match"] = (hasName && strcmp(threat.radioType, "wifi") == 0);
-    indicators["mac_match"] = true;
-    indicators["name_match"] = (hasName && strcmp(threat.radioType, "bluetooth") == 0);
-    indicators["service_uuid_match"] = (strcmp(threat.category, "acoustic_detector") == 0);
-}
-
-void TelemetryReporter::appendMetadata(const ThreatEvent& threat, JsonDocument& doc) {
-    JsonObject metadata = doc.createNestedObject("metadata");
-    
-    if (strcmp(threat.radioType, "wifi") == 0) {
-        metadata["frame_type"] = "beacon";
-    } else {
-        metadata["frame_type"] = "advertisement";
-    }
-    
-    metadata["detection_method"] = "combined_signature";
-}
-
-void TelemetryReporter::outputJSON(const JsonDocument& doc) {
-    serializeJson(doc, Serial);
-    Serial.println();
-}
 
 // Main system initialization
 void setup() {
@@ -544,43 +389,24 @@ void setup() {
     buzzerBeep(2400, 120);
     
     EventBus::subscribeWifiFrame([](const WiFiFrameEvent& event) {
-        threatEngine.analyzeWiFiFrame(event);
-        if (screenMode != ScreenMode::Radar) return;
-        unsigned long now = millis();
-        if (now - lastDisplayUpdateMs >= kDisplayUpdateMs) {
-            char line1[20];
-            char line2[20];
-            snprintf(line1, sizeof(line1), "WiFi ch %u", event.channel);
-            snprintf(line2, sizeof(line2), "RSSI %d", event.rssi);
-            updateStatusLines(line1, line2);
-            displayShowRadarOverlay(lastStatusLine1, lastStatusLine2);
-            lastDisplayUpdateMs = now;
-        }
+        portENTER_CRITICAL(&wifiMux);
+        pendingWiFiFrame = event;
+        wifiFramePending = true;
+        portEXIT_CRITICAL(&wifiMux);
     });
-    
+
     EventBus::subscribeBluetoothDevice([](const BluetoothDeviceEvent& event) {
-        threatEngine.analyzeBluetoothDevice(event);
-        if (screenMode != ScreenMode::Radar) return;
-        unsigned long now = millis();
-        if (now - lastDisplayUpdateMs >= kDisplayUpdateMs) {
-            char line1[20];
-            char line2[20];
-            snprintf(line1, sizeof(line1), "BLE device");
-            snprintf(line2, sizeof(line2), "RSSI %d", event.rssi);
-            updateStatusLines(line1, line2);
-            displayShowRadarOverlay(lastStatusLine1, lastStatusLine2);
-            lastDisplayUpdateMs = now;
-        }
+        portENTER_CRITICAL(&bleMux);
+        pendingBleDevice = event;
+        bleDevicePending = true;
+        portEXIT_CRITICAL(&bleMux);
     });
-    
+
     EventBus::subscribeThreat([](const ThreatEvent& event) {
-        reporter.handleThreatDetection(event);
-        const char* label = (event.identifier[0] != '\0') ? event.identifier : "Target";
-        screenMode = ScreenMode::ReadyHold;
-        displayShowStatus("ALERT", label);
-        buzzerBeep(2800, 120);
-        delay(80);
-        buzzerBeep(2800, 120);
+        portENTER_CRITICAL(&threatMux);
+        pendingThreat = event;
+        threatPending = true;
+        portEXIT_CRITICAL(&threatMux);
     });
     
     EventBus::subscribeSystemReady([]() {
@@ -605,6 +431,69 @@ void setup() {
 
 void loop() {
     rfScanner.update();
+    uint32_t now = millis();
+
+    if (wifiFramePending) {
+        WiFiFrameEvent frameCopy;
+        portENTER_CRITICAL(&wifiMux);
+        frameCopy = pendingWiFiFrame;
+        wifiFramePending = false;
+        portEXIT_CRITICAL(&wifiMux);
+
+        if (screenMode == ScreenMode::Radar && (now - lastDisplayUpdateMs >= kDisplayUpdateMs)) {
+            char line1[20];
+            char line2[20];
+            snprintf(line1, sizeof(line1), "WiFi ch %u", frameCopy.channel);
+            snprintf(line2, sizeof(line2), "RSSI %d", frameCopy.rssi);
+            updateStatusLines(line1, line2);
+            displayShowRadarOverlay(lastStatusLine1, lastStatusLine2);
+            lastDisplayUpdateMs = now;
+        }
+        threatEngine.analyzeWiFiFrame(frameCopy);
+    }
+
+    if (bleDevicePending) {
+        BluetoothDeviceEvent bleCopy;
+        portENTER_CRITICAL(&bleMux);
+        bleCopy = pendingBleDevice;
+        bleDevicePending = false;
+        portEXIT_CRITICAL(&bleMux);
+
+        if (screenMode == ScreenMode::Radar && (now - lastDisplayUpdateMs >= kDisplayUpdateMs)) {
+            char line1[20];
+            char line2[20];
+            snprintf(line1, sizeof(line1), "BLE device");
+            snprintf(line2, sizeof(line2), "RSSI %d", bleCopy.rssi);
+            updateStatusLines(line1, line2);
+            displayShowRadarOverlay(lastStatusLine1, lastStatusLine2);
+            lastDisplayUpdateMs = now;
+        }
+        threatEngine.analyzeBluetoothDevice(bleCopy);
+    }
+
+    if (threatEngine.tick(now)) {
+        buzzerBeep(1800, 40);
+    }
+
+    if (threatPending) {
+        ThreatEvent threatCopy;
+        portENTER_CRITICAL(&threatMux);
+        threatCopy = pendingThreat;
+        threatPending = false;
+        portEXIT_CRITICAL(&threatMux);
+        reporter.handleThreatDetection(threatCopy);
+        if (threatCopy.shouldAlert) {
+            const char* label = (threatCopy.identifier[0] != '\0') ? threatCopy.identifier : "Target";
+            screenMode = ScreenMode::ReadyHold;
+            displayShowStatus("ALERT", label);
+            buzzerBeep(2800, 120);
+            delay(80);
+            buzzerBeep(2800, 120);
+        } else if (threatCopy.alertLevel == ALERT_SUSPICIOUS && threatCopy.firstDetection) {
+            buzzerBeep(1800, 60);
+        }
+    }
+
     updateRadarSweep();
     if (screenMode == ScreenMode::Radar && displayReady) {
         displayShowRadarOverlay(lastStatusLine1, lastStatusLine2);
