@@ -10,7 +10,9 @@ namespace DeviceProfiles {
         "58:8e:81", "cc:cc:cc", "ec:1b:bd", "90:35:ea", "04:0d:84",
         "f0:82:c0", "1c:34:f1", "38:5b:44", "94:34:69", "b4:e3:f9",
         "70:c9:4e", "3c:91:80", "d8:f3:bc", "80:30:49", "14:5a:fc",
-        "74:4c:a1", "08:3a:88", "9c:2f:9d", "94:08:53", "e4:aa:ea"
+        "74:4c:a1", "08:3a:88", "9c:2f:9d", "94:08:53", "e4:aa:ea",
+        "f4:6a:dd", "f8:a2:d6", "e0:0a:f6", "00:f4:8d", "d0:39:57",
+        "e8:d0:fc", "24:b2:b9"
     };
     const size_t MACPrefixCount = sizeof(MACPrefixes) / sizeof(MACPrefixes[0]);
 
@@ -47,6 +49,8 @@ namespace DeviceProfiles {
         { "00:12:81", "March Networks" },
         // Mobotix
         { "00:03:c5", "Mobotix" },
+        // SoundThinking (ShotSpotter)
+        { "d4:11:d6", "SoundThinking" },
         // Sunell Electronics
         { "00:1c:27", "Sunell Electronics" },
     };
