@@ -32,9 +32,13 @@ struct ThreatEvent {
     char identifier[64];
     int8_t rssi;
     uint8_t channel;
-    const char* radioType;
+    char radioType[16];
     uint8_t certainty;
-    const char* category;
+    char category[24];
+    uint16_t matchFlags;
+    uint8_t  detectorWeights[8];
+    int8_t   rssiModifier;
+    bool     shouldAlert;
 };
 
 class EventBus {

@@ -78,6 +78,9 @@ namespace {
     portMUX_TYPE wifiMux = portMUX_INITIALIZER_UNLOCKED;
     volatile bool wifiFramePending = false;
     WiFiFrameEvent pendingWiFiFrame;
+    portMUX_TYPE bleMux = portMUX_INITIALIZER_UNLOCKED;
+    volatile bool bleDevicePending = false;
+    BluetoothDeviceEvent pendingBleDevice;
     bool statusMessageActive = false;
     uint32_t statusMessageUntilMs = 0;
 
@@ -510,193 +513,12 @@ void RadioScannerManager::wifiPacketHandler(void* buffer, wifi_promiscuous_pkt_t
     EventBus::publishWifiFrame(event);
 }
 
-uint8_t RadioScannerManager::currentWifiChannel = 1;
+volatile uint8_t RadioScannerManager::currentWifiChannel = 1;
 unsigned long RadioScannerManager::lastChannelSwitch = 0;
 unsigned long RadioScannerManager::lastBLEScan = 0;
 NimBLEScan* RadioScannerManager::bleScanner = nullptr;
 bool RadioScannerManager::isScanningBLE = false;
 
-// ThreatAnalyzer implementation
-void ThreatAnalyzer::initialize() {
-    // Analyzer ready
-}
-
-void ThreatAnalyzer::analyzeWiFiFrame(const WiFiFrameEvent& frame) {
-    bool nameMatch = strlen(frame.ssid) > 0 && matchesNetworkName(frame.ssid);
-    bool macMatch = matchesMACPrefix(frame.mac);
-    
-    if (nameMatch || macMatch) {
-        uint8_t certainty = calculateCertainty(nameMatch, macMatch, false);
-        emitThreatDetection(frame, "wifi", certainty);
-    }
-}
-
-void ThreatAnalyzer::analyzeBluetoothDevice(const BluetoothDeviceEvent& device) {
-    bool nameMatch = strlen(device.name) > 0 && matchesBLEName(device.name);
-    bool macMatch = matchesMACPrefix(device.mac);
-    bool uuidMatch = device.hasServiceUUID && matchesRavenService(device.serviceUUID);
-    
-    if (nameMatch || macMatch || uuidMatch) {
-        uint8_t certainty = calculateCertainty(nameMatch, macMatch, uuidMatch);
-        const char* category = determineCategory(uuidMatch);
-        emitThreatDetection(device, "bluetooth", certainty, category);
-    }
-}
-
-bool ThreatAnalyzer::matchesNetworkName(const char* ssid) {
-    if (!ssid) return false;
-    
-    for (size_t i = 0; i < DeviceProfiles::NetworkNameCount; i++) {
-        if (strcasestr(ssid, DeviceProfiles::NetworkNames[i])) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ThreatAnalyzer::matchesMACPrefix(const uint8_t* mac) {
-    char macStr[9];
-    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x", mac[0], mac[1], mac[2]);
-    
-    for (size_t i = 0; i < DeviceProfiles::MACPrefixCount; i++) {
-        if (strncasecmp(macStr, DeviceProfiles::MACPrefixes[i], 8) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ThreatAnalyzer::matchesBLEName(const char* name) {
-    if (!name) return false;
-    
-    for (size_t i = 0; i < DeviceProfiles::BLEIdentifierCount; i++) {
-        if (strcasestr(name, DeviceProfiles::BLEIdentifiers[i])) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ThreatAnalyzer::matchesRavenService(const char* uuid) {
-    if (!uuid) return false;
-    
-    for (size_t i = 0; i < DeviceProfiles::RavenServiceCount; i++) {
-        if (strcasecmp(uuid, DeviceProfiles::RavenServices[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-uint8_t ThreatAnalyzer::calculateCertainty(bool nameMatch, bool macMatch, bool uuidMatch) {
-    if (nameMatch && macMatch && uuidMatch) return 100;
-    if (nameMatch && macMatch) return 95;
-    if (uuidMatch) return 90;
-    if (nameMatch || macMatch) return 85;
-    return 70;
-}
-
-const char* ThreatAnalyzer::determineCategory(bool isRaven) {
-    return isRaven ? "acoustic_detector" : "surveillance_device";
-}
-
-void ThreatAnalyzer::emitThreatDetection(const WiFiFrameEvent& frame, const char* radio, uint8_t certainty) {
-    ThreatEvent threat;
-    memset(&threat, 0, sizeof(threat));
-    memcpy(threat.mac, frame.mac, 6);
-    strncpy(threat.identifier, frame.ssid, sizeof(threat.identifier) - 1);
-    threat.rssi = frame.rssi;
-    threat.channel = frame.channel;
-    threat.radioType = radio;
-    threat.certainty = certainty;
-    threat.category = "surveillance_device";
-    
-    EventBus::publishThreat(threat);
-}
-
-void ThreatAnalyzer::emitThreatDetection(const BluetoothDeviceEvent& device, const char* radio, uint8_t certainty, const char* category) {
-    ThreatEvent threat;
-    memset(&threat, 0, sizeof(threat));
-    memcpy(threat.mac, device.mac, 6);
-    strncpy(threat.identifier, device.name, sizeof(threat.identifier) - 1);
-    threat.rssi = device.rssi;
-    threat.channel = 0;
-    threat.radioType = radio;
-    threat.certainty = certainty;
-    threat.category = category;
-    
-    EventBus::publishThreat(threat);
-}
-
-// TelemetryReporter implementation
-void TelemetryReporter::initialize() {
-    bootTime = millis();
-}
-
-void TelemetryReporter::handleThreatDetection(const ThreatEvent& threat) {
-    DynamicJsonDocument doc(2048);
-    
-    doc["event"] = "target_detected";
-    doc["ms_since_boot"] = millis() - bootTime;
-    
-    appendSourceInfo(threat, doc);
-    appendTargetIdentity(threat, doc);
-    appendIndicators(threat, doc);
-    appendMetadata(threat, doc);
-    
-    outputJSON(doc);
-}
-
-void TelemetryReporter::appendSourceInfo(const ThreatEvent& threat, JsonDocument& doc) {
-    JsonObject source = doc.createNestedObject("source");
-    source["radio"] = threat.radioType;
-    source["channel"] = threat.channel;
-    source["rssi"] = threat.rssi;
-}
-
-void TelemetryReporter::appendTargetIdentity(const ThreatEvent& threat, JsonDocument& doc) {
-    JsonObject target = doc.createNestedObject("target");
-    JsonObject identity = target.createNestedObject("identity");
-    
-    char macStr[18];
-    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
-             threat.mac[0], threat.mac[1], threat.mac[2],
-             threat.mac[3], threat.mac[4], threat.mac[5]);
-    identity["mac"] = macStr;
-    
-    char oui[9];
-    snprintf(oui, sizeof(oui), "%02x:%02x:%02x", threat.mac[0], threat.mac[1], threat.mac[2]);
-    identity["oui"] = oui;
-    
-    identity["label"] = threat.identifier;
-}
-
-void TelemetryReporter::appendIndicators(const ThreatEvent& threat, JsonDocument& doc) {
-    JsonObject indicators = doc["target"].createNestedObject("indicators");
-    
-    bool hasName = strlen(threat.identifier) > 0;
-    indicators["ssid_match"] = (hasName && strcmp(threat.radioType, "wifi") == 0);
-    indicators["mac_match"] = true;
-    indicators["name_match"] = (hasName && strcmp(threat.radioType, "bluetooth") == 0);
-    indicators["service_uuid_match"] = (strcmp(threat.category, "acoustic_detector") == 0);
-}
-
-void TelemetryReporter::appendMetadata(const ThreatEvent& threat, JsonDocument& doc) {
-    JsonObject metadata = doc.createNestedObject("metadata");
-    
-    if (strcmp(threat.radioType, "wifi") == 0) {
-        metadata["frame_type"] = "beacon";
-    } else {
-        metadata["frame_type"] = "advertisement";
-    }
-    
-    metadata["detection_method"] = "combined_signature";
-}
-
-void TelemetryReporter::outputJSON(const JsonDocument& doc) {
-    serializeJson(doc, Serial);
-    Serial.println();
-}
 
 // Main system initialization
 void setup() {
@@ -726,7 +548,10 @@ void setup() {
     });
     
     EventBus::subscribeBluetoothDevice([](const BluetoothDeviceEvent& event) {
-        threatEngine.analyzeBluetoothDevice(event);
+        portENTER_CRITICAL(&bleMux);
+        pendingBleDevice = event;
+        bleDevicePending = true;
+        portEXIT_CRITICAL(&bleMux);
     });
     
     EventBus::subscribeThreat([](const ThreatEvent& event) {
@@ -777,6 +602,19 @@ void loop() {
         threatEngine.analyzeWiFiFrame(frameCopy);
     }
 
+    if (bleDevicePending) {
+        BluetoothDeviceEvent bleCopy;
+        portENTER_CRITICAL(&bleMux);
+        bleCopy = pendingBleDevice;
+        bleDevicePending = false;
+        portEXIT_CRITICAL(&bleMux);
+        threatEngine.analyzeBluetoothDevice(bleCopy);
+    }
+
+    if (threatEngine.tick(now)) {
+        M5.Speaker.tone(1800, 40);
+    }
+
     if (threatPending) {
         ThreatEvent threatCopy;
         portENTER_CRITICAL(&threatMux);
@@ -784,7 +622,7 @@ void loop() {
         threatPending = false;
         portEXIT_CRITICAL(&threatMux);
         reporter.handleThreatDetection(threatCopy);
-        triggerAlert(now);
+        if (threatCopy.shouldAlert) triggerAlert(now);
     }
 
     if (M5.BtnB.pressedFor(2000) && !powerToggleHandled) {
