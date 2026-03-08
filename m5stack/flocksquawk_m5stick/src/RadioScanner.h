@@ -13,16 +13,16 @@
 class RadioScannerManager {
 public:
     static const uint8_t MAX_WIFI_CHANNEL = 13;
-    static const uint16_t CHANNEL_SWITCH_MS = 500;
-    static const uint8_t BLE_SCAN_SECONDS = 1;
+    static const uint16_t CHANNEL_SWITCH_MS = 300;
+    static const uint8_t BLE_SCAN_SECONDS = 2;
     static const uint32_t BLE_SCAN_INTERVAL_MS = 5000;
 
     void initialize();
     void update();  // Call from main loop
     static uint8_t getCurrentWifiChannel();
-    
+
 private:
-    static uint8_t currentWifiChannel;
+    static volatile uint8_t currentWifiChannel;
     static unsigned long lastChannelSwitch;
     static unsigned long lastBLEScan;
     static NimBLEScan* bleScanner;
