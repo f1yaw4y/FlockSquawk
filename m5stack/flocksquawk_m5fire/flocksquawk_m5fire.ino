@@ -342,6 +342,9 @@ unsigned long RadioScannerManager::lastChannelSwitch = 0;
 unsigned long RadioScannerManager::lastBLEScan = 0;
 NimBLEScan* RadioScannerManager::bleScanner = nullptr;
 bool RadioScannerManager::isScanningBLE = false;
+uint16_t RadioScannerManager::CHANNEL_SWITCH_MS = 300;
+uint8_t RadioScannerManager::BLE_SCAN_SECONDS = 2;
+uint32_t RadioScannerManager::BLE_SCAN_INTERVAL_MS = 5000;
 
 // SoundEngine implementation
 void SoundEngine::initialize() {
@@ -1125,6 +1128,23 @@ void loop() {
     rfScanner.update();
     audioSystem.update();
     uint32_t now = millis();
+
+    // Check external power periodically and adjust scan/display modes
+    static bool lastOnExternalPower = false;
+    static uint32_t lastPowerCheckMs = 0;
+    if (now - lastPowerCheckMs >= 5000) {
+        bool onExternalPower = M5.Power.isCharging();
+        if (onExternalPower != lastOnExternalPower) {
+            RadioScannerManager::setPerformanceMode(onExternalPower);
+            if (onExternalPower && batterySaverEnabled) {
+                batterySaverEnabled = false;
+                setDisplayPower(true);
+                resetHomeUi();
+            }
+            lastOnExternalPower = onExternalPower;
+        }
+        lastPowerCheckMs = now;
+    }
 
     if (wifiFramePending) {
         WiFiFrameEvent frameCopy;
