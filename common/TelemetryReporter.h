@@ -6,10 +6,16 @@
 #include "EventBus.h"
 #include "DetectorTypes.h"
 
+class BleTransport;  // forward declaration
+
 class TelemetryReporter {
 public:
     void initialize() {
         bootTime = millis();
+    }
+
+    void setBleTransport(BleTransport* transport) {
+        _bleTransport = transport;
     }
 
     void handleThreatDetection(const ThreatEvent& threat) {
@@ -58,12 +64,28 @@ public:
             }
         }
 
-        serializeJson(doc, Serial);
+        // +1 byte for the newline that _sendViaBle appends
+        char buf[513];
+        size_t len = serializeJson(doc, buf, sizeof(buf) - 1);
+
+        // Always output to Serial (USB)
+        Serial.write(buf, len);
         Serial.println();
+
+        // Also send via BLE if a client is connected.
+        // Skip if JSON was truncated (len == sizeof(buf)-1) since the
+        // client would fail to parse it anyway.
+        if (_bleTransport && len < sizeof(buf) - 1) {
+            _sendViaBle(buf, len);
+        }
     }
 
 private:
     unsigned long bootTime;
+    BleTransport* _bleTransport = nullptr;
+
+    // Defined in .ino after BleTransport.h is included
+    inline void _sendViaBle(char* buf, size_t len);
 };
 
 #endif
