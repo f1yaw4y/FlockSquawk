@@ -106,6 +106,15 @@ tone constants, both measured on hardware:
   sound like silence, so tone durations are longer in this variant. Anything
   under roughly 90ms is unreliable.
 
+### Alert tone
+
+The alert is a two-tone klaxon (520/700Hz, alternating every 190ms) rather than
+the single repeated 2600Hz beep the other variants use. Chosen by ear against
+eight alternatives, on the reasoning that a car cabin absorbs high frequencies:
+a 2600Hz beep tests well on a desk and vanishes at speed. The tone runs on its
+own timer rather than riding the screen-flash interval, so its cadence can be
+tuned without changing the blink rate.
+
 ### Battery life
 
 The StickS3 carries a 250mAh cell, and WiFi promiscuous mode plus BLE scanning

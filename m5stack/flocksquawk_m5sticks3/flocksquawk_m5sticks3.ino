@@ -33,7 +33,13 @@ EventBus::AudioHandler EventBus::audioHandler = nullptr;
 
 namespace {
     const uint16_t STARTUP_BEEP_FREQ = 2000;
-    const uint16_t ALERT_BEEP_FREQ = 2600;
+    // Alert is a two-tone klaxon rather than a single repeated pitch. Chosen by
+    // ear against eight alternatives: the low pair carries through road noise
+    // and a car cabin, which absorbs high frequencies. A 2600Hz beep tests well
+    // on a desk and disappears at speed.
+    const uint16_t ALERT_TONE_LOW  = 520;
+    const uint16_t ALERT_TONE_HIGH = 700;
+    const uint16_t ALERT_TONE_MS   = 190;
     // The ES8311 codec needs a moment to wake and unmute at the start of
     // playback. The Plus2's buzzer does not, so its 80ms beeps are almost
     // entirely swallowed here and sound like silence. Tones are lengthened
@@ -53,7 +59,6 @@ namespace {
     const uint16_t RSSI_LINE_COLOR = TFT_CYAN;
     const uint32_t ALERT_DURATION_MS = 4000;
     const uint32_t ALERT_FLASH_MS = 300;
-    const uint16_t ALERT_BEEP_MS = 220;
     const uint32_t SCREEN_ON_MS = 4000;
     const uint32_t POWER_SAVE_MSG_MS = 2000;
     const uint32_t STATUS_MSG_MS = 1500;
@@ -71,6 +76,22 @@ namespace {
     // an alert fires. Raise it if you want more volume and are mains-powered.
     const uint8_t SPEAKER_MAGNIFICATION = 8;
 
+    // The ES8311 clips the first tone played after the amplifier has been idle,
+    // which silently ate one of the three startup beeps during testing. Spend
+    // that clipped tone on an inaudible blip instead, so the first tone that
+    // matters -- and in normal operation that is an alert, not a startup beep --
+    // arrives intact.
+    void primeSpeaker() {
+        M5.Speaker.setVolume(1);
+        M5.Speaker.setAllChannelVolume(1);
+        M5.Speaker.tone(4000, 50);
+        delay(80);
+        while (M5.Speaker.isPlaying()) delay(5);
+        M5.Speaker.setVolume(SPEAKER_VOLUME);
+        M5.Speaker.setAllChannelVolume(SPEAKER_VOLUME);
+        delay(40);
+    }
+
     void playBeepPattern(uint16_t frequency, uint16_t durationMs, uint8_t count) {
         for (uint8_t i = 0; i < count; i++) {
             M5.Speaker.tone(frequency, durationMs);
@@ -87,6 +108,11 @@ namespace {
     uint32_t alertStartMs = 0;
     uint32_t alertLastFlashMs = 0;
     uint32_t alertUntilMs = 0;
+    // The klaxon runs on its own timer rather than riding the flash interval,
+    // so the alternation rate can be tuned without changing how fast the screen
+    // blinks -- and so the blink rate stays low.
+    uint32_t alertLastToneMs = 0;
+    bool alertToneHigh = false;
     uint32_t detectionCount = 0;
     bool powerSaverEnabled = true;
     portMUX_TYPE threatMux = portMUX_INITIALIZER_UNLOCKED;
@@ -321,6 +347,8 @@ namespace {
         alertVisible = false;
         alertStartMs = nowMs;
         alertLastFlashMs = 0;
+        alertLastToneMs = 0;
+        alertToneHigh = false;
         alertUntilMs = nowMs + ALERT_DURATION_MS;
         M5.Display.fillScreen(TFT_RED);
         drawAlertText(true);
@@ -336,14 +364,18 @@ namespace {
 
         if (nowMs - alertLastFlashMs >= ALERT_FLASH_MS) {
             alertVisible = !alertVisible;
-            if (alertVisible) {
-                drawAlertText(true);
-                M5.Speaker.tone(ALERT_BEEP_FREQ, ALERT_BEEP_MS);
-            } else {
-                drawAlertText(false);
-            }
+            drawAlertText(alertVisible);
             setAlertLed(alertVisible);
             alertLastFlashMs = nowMs;
+        }
+
+        // Klaxon: alternate the two pitches on their own cadence, independent
+        // of the visual flash.
+        if (nowMs - alertLastToneMs >= ALERT_TONE_MS) {
+            M5.Speaker.tone(alertToneHigh ? ALERT_TONE_HIGH : ALERT_TONE_LOW,
+                            ALERT_TONE_MS);
+            alertToneHigh = !alertToneHigh;
+            alertLastToneMs = nowMs;
         }
 
         return true;
@@ -593,6 +625,7 @@ void setup() {
         M5.Speaker.begin();
         M5.Speaker.setVolume(SPEAKER_VOLUME);
         M5.Speaker.setAllChannelVolume(SPEAKER_VOLUME);
+        primeSpeaker();
     }
 
     M5.Display.setTextSize(2);
