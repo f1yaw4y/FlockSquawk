@@ -28,6 +28,7 @@ RadioScannerManager (WiFi promiscuous + BLE scan)
 | Variant | FQBN | Sketch Path | Display | Audio |
 |---------|------|-------------|---------|-------|
 | M5StickC Plus2 | `esp32:esp32:m5stack_stickc_plus2` | `m5stack/flocksquawk_m5stick/` | Built-in TFT | Buzzer tones |
+| M5StickS3 | `esp32:esp32:esp32s3` (see Makefile for options) | `m5stack/flocksquawk_m5sticks3/` | Built-in TFT | ES8311 speaker |
 | M5Stack FIRE | `esp32:esp32:m5stack_fire` | `m5stack/flocksquawk_m5fire/` | Built-in TFT | Built-in speaker |
 | Mini12864 | `esp32:esp32:esp32` | `Mini12864/flocksquawk_mini12864/` | ST7567 LCD 128x64 | I2S (MAX98357A) |
 | 128x32 OLED | `esp32:esp32:esp32` | `128x32_OLED/flocksquawk_128x32/` | SSD1306/SH1106 I2C | I2S (MAX98357A) |
