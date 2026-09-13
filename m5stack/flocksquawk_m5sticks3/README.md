@@ -84,11 +84,39 @@ Open at **115200** baud. See [Telemetry Format](../../docs/telemetry-format.md) 
 
 | Area | StickC Plus2 | StickS3 |
 |------|--------------|---------|
-| Audio | Passive buzzer, fixed volume | ES8311 codec + AW8737 amp; volume set explicitly at startup |
+| Audio | Passive buzzer, fixed volume | ES8311 codec + AW8737 amp; volume, magnification and tone length all set explicitly |
 | Alert LED | Red LED flashes with the alert | No user LED; `setAlertLed()` is a deliberate no-op |
 | Battery | Read from AXP192 | Read via M5Unified; shows `--` if the gauge is unavailable |
 | Backlight | Set by `M5.begin()` | Brightness reapplied after `M5.begin()` |
 | Board | `m5stack_stickc_plus2` | Generic ESP32-S3 with OPI PSRAM |
+
+### Audio notes
+
+Two things about this board's audio path are worth knowing before changing the
+tone constants, both measured on hardware:
+
+- **Magnification.** M5Unified defaults the StickS3 to `magnification = 1`,
+  which through the codec and amplifier is inaudible. Values 1 through 12 were
+  all verified to play cleanly on USB power; 16 triggered the ESP32 brownout
+  detector while running from a partly discharged battery. `SPEAKER_MAGNIFICATION`
+  is set to **8** — audible in a moving car, with headroom left for the radios,
+  which are transmitting at the moment an alert fires.
+- **Tone length.** The ES8311 takes a moment to wake and unmute at the start of
+  playback. The Plus2's 80ms beeps are mostly consumed by that latency here and
+  sound like silence, so tone durations are longer in this variant. Anything
+  under roughly 90ms is unreliable.
+
+### Battery life
+
+The StickS3 carries a 250mAh cell, and WiFi promiscuous mode plus BLE scanning
+draws continuously. Expect on the order of an hour or two of untethered
+runtime. The power saver only blanks the screen; the radios dominate
+consumption, so it extends runtime less than you might expect. For sustained
+use, run it from USB.
+
+Note also that the battery percentage reads high for the first minute or so
+after unplugging, as the cell sheds surface charge. A rapid apparent drop right
+after disconnecting the charger is the gauge catching up, not a fault.
 
 ## Project Structure
 

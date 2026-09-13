@@ -34,7 +34,11 @@ EventBus::AudioHandler EventBus::audioHandler = nullptr;
 namespace {
     const uint16_t STARTUP_BEEP_FREQ = 2000;
     const uint16_t ALERT_BEEP_FREQ = 2600;
-    const uint16_t BEEP_DURATION_MS = 80;
+    // The ES8311 codec needs a moment to wake and unmute at the start of
+    // playback. The Plus2's buzzer does not, so its 80ms beeps are almost
+    // entirely swallowed here and sound like silence. Tones are lengthened
+    // to clear that startup latency.
+    const uint16_t BEEP_DURATION_MS = 200;
     const uint16_t BEEP_GAP_MS = 60;
     const uint16_t RADAR_LINE_COLOR = TFT_GREEN;
     const uint16_t STATUS_TEXT_COLOR = TFT_WHITE;
@@ -49,15 +53,23 @@ namespace {
     const uint16_t RSSI_LINE_COLOR = TFT_CYAN;
     const uint32_t ALERT_DURATION_MS = 4000;
     const uint32_t ALERT_FLASH_MS = 300;
-    const uint16_t ALERT_BEEP_MS = 180;
+    const uint16_t ALERT_BEEP_MS = 220;
     const uint32_t SCREEN_ON_MS = 4000;
     const uint32_t POWER_SAVE_MSG_MS = 2000;
     const uint32_t STATUS_MSG_MS = 1500;
     const uint8_t DISPLAY_BRIGHTNESS_ON = 80;
     // The StickC Plus2 beeps through a passive buzzer, where volume is fixed.
-    // The StickS3 drives a real speaker through an ES8311 codec, which comes up
-    // silent unless a volume is set explicitly.
-    const uint8_t SPEAKER_VOLUME = 160;
+    // The StickS3 drives a real speaker through an ES8311 codec and an AW8737
+    // amplifier, so both volume and magnification have to be set explicitly.
+    const uint8_t SPEAKER_VOLUME = 200;
+
+    // M5Unified defaults this board to magnification 1, which is inaudible
+    // through the codec path. Measured on hardware: 1 through 12 all play
+    // cleanly on USB power; 16 triggered the brownout detector while running
+    // from a partly discharged battery. 8 is loud enough to hear in a moving
+    // car while leaving headroom for the radios, which are transmitting when
+    // an alert fires. Raise it if you want more volume and are mains-powered.
+    const uint8_t SPEAKER_MAGNIFICATION = 8;
 
     void playBeepPattern(uint16_t frequency, uint16_t durationMs, uint8_t count) {
         for (uint8_t i = 0; i < count; i++) {
@@ -570,7 +582,19 @@ void setup() {
     // Board-specific GPIO setup inside M5.begin() can leave the backlight at its
     // power-on default, so brightness is applied explicitly afterwards.
     M5.Display.setBrightness(DISPLAY_BRIGHTNESS_ON);
-    M5.Speaker.setVolume(SPEAKER_VOLUME);
+
+    // Restart the speaker with an audible magnification. M5Unified's default
+    // of 1 produces no usable output on this board.
+    {
+        M5.Speaker.end();
+        auto spkCfg = M5.Speaker.config();
+        spkCfg.magnification = SPEAKER_MAGNIFICATION;
+        M5.Speaker.config(spkCfg);
+        M5.Speaker.begin();
+        M5.Speaker.setVolume(SPEAKER_VOLUME);
+        M5.Speaker.setAllChannelVolume(SPEAKER_VOLUME);
+    }
+
     M5.Display.setTextSize(2);
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
     M5.Display.clear(TFT_BLACK);
@@ -672,7 +696,7 @@ void loop() {
     }
 
     if (threatEngine.tick(now)) {
-        M5.Speaker.tone(1800, 40);
+        M5.Speaker.tone(1800, 90);   // 40ms is below this codec's wake latency
     }
 
     if (threatPending) {
@@ -685,7 +709,7 @@ void loop() {
         if (threatCopy.shouldAlert) {
             triggerAlert(now);
         } else if (threatCopy.alertLevel == ALERT_SUSPICIOUS && threatCopy.firstDetection) {
-            M5.Speaker.tone(1800, 60);
+            M5.Speaker.tone(1800, 130);
         }
     }
 
