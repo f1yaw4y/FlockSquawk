@@ -30,11 +30,18 @@ MKLITTLEFS    = $(firstword $(wildcard $(ARDUINO_DATA)/packages/esp32/tools/mkli
 # ──────────────────────────────────────────────
 # Variant definitions:  NAME  FQBN  SKETCH_DIR  HAS_DATA
 # ──────────────────────────────────────────────
-VARIANTS := m5stick m5fire mini12864 oled portable flipper
+VARIANTS := m5stick m5sticks3 m5fire mini12864 oled portable flipper
 
 m5stick_FQBN   := esp32:esp32:m5stack_stickc_plus2
 m5stick_SKETCH := m5stack/flocksquawk_m5stick
 m5stick_DATA   :=
+
+# The StickS3 has no dedicated board definition in ESP32 core 3.0.7, so it is
+# built as a generic ESP32-S3 with the board's actual flash/PSRAM layout.
+# M5Unified detects the board at runtime, not from the FQBN.
+m5sticks3_FQBN   := esp32:esp32:esp32s3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,CDCOnBoot=cdc
+m5sticks3_SKETCH := m5stack/flocksquawk_m5sticks3
+m5sticks3_DATA   :=
 
 m5fire_FQBN    := esp32:esp32:m5stack_fire
 m5fire_SKETCH  := m5stack/flocksquawk_m5fire

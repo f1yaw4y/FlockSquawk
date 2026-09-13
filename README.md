@@ -42,6 +42,7 @@ FlockSquawk supports multiple hardware front-ends. Each variant lives in its own
 | Variant | Path | Display | Audio |
 |---------|------|---------|-------|
 | [M5StickC Plus2](m5stack/flocksquawk_m5stick/README.md) | `m5stack/flocksquawk_m5stick/` | Built-in TFT | Buzzer tones |
+| [M5StickS3](m5stack/flocksquawk_m5sticks3/README.md) | `m5stack/flocksquawk_m5sticks3/` | Built-in TFT | ES8311 speaker |
 | [M5Stack FIRE](m5stack/flocksquawk_m5fire/README.md) | `m5stack/flocksquawk_m5fire/` | Built-in TFT | Built-in speaker |
 | [Mini12864](Mini12864/flocksquawk_mini12864/README.md) | `Mini12864/flocksquawk_mini12864/` | ST7567 LCD 128x64 | I2S (MAX98357A) |
 | [128x32 OLED](128x32_OLED/flocksquawk_128x32/README.md) | `128x32_OLED/flocksquawk_128x32/` | SSD1306/SH1106 I2C | I2S (MAX98357A) |
@@ -75,6 +76,7 @@ FlockSquawk/
 ├── docs/                            # Project-wide documentation
 ├── m5stack/
 │   ├── flocksquawk_m5stick/         # M5StickC Plus2 variant
+│   ├── flocksquawk_m5sticks3/       # M5StickS3 variant
 │   └── flocksquawk_m5fire/          # M5Stack FIRE variant
 ├── Mini12864/
 │   └── flocksquawk_mini12864/       # Mini12864 LCD variant
