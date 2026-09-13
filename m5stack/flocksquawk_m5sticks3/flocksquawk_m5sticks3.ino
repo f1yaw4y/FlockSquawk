@@ -530,7 +530,9 @@ void RadioScannerManager::performBLEScan() {
     unsigned long now = millis();
     if (now - lastBLEScan >= BLE_SCAN_INTERVAL_MS && !isScanningBLE) {
         if (bleScanner && !bleScanner->isScanning()) {
-            bleScanner->start(BLE_SCAN_SECONDS, false);
+            // NimBLEScan::start() takes MILLISECONDS. Passing the seconds value
+            // directly scanned for 2ms every 5s, which caught almost nothing.
+            bleScanner->start(BLE_SCAN_SECONDS * 1000, false);
             isScanningBLE = true;
             lastBLEScan = now;
         }
